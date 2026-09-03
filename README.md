@@ -245,7 +245,19 @@ void main() async {
 }
 ```
 
-By default, these parameters are `null` (no timeout is enforced). Without these timeouts, the connection or authentication process could hang indefinitely if the remote server becomes unresponsive.
+By default both are `null` and nothing is enforced, so a server that accepts
+the connection and then stops responding leaves the client waiting for as long
+as the socket stays open. `keepAliveInterval` does not cover this, since it
+only starts once the connection is up.
+
+Pick the values against how long a **person** might take, not how long the
+network should take. Both are deadlines over the whole phase rather than
+inactivity timers, and your own callbacks run inside them: `onVerifyHostKey`
+counts against `handshakeTimeout`, and `onPasswordRequest` and
+`onUserInfoRequest` count against `authTimeout`. The 15 seconds above is fine
+for the literal password in this example and far too short for a real prompt,
+where someone reading a fingerprint or typing a passphrase will blow through
+it and lose the connection.
 
 ### Spawn a shell on remote host
 

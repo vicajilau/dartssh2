@@ -230,9 +230,30 @@ class SSHClient {
   final Duration? keepAliveInterval;
 
   /// Maximum time to wait for the SSH transport handshake to complete.
+  ///
+  /// Null by default, so nothing bounds the handshake out of the box: a peer
+  /// that accepts the connection and then stops sending leaves the client
+  /// waiting for as long as the socket stays open. [keepAliveInterval] does
+  /// not cover this, since it only starts once the connection is up.
+  ///
+  /// This is a deadline over the whole handshake rather than an inactivity
+  /// timer, and [onVerifyHostKey] is awaited inside it. If that callback puts
+  /// a fingerprint in front of someone, the time they spend deciding counts
+  /// against this, so a value short enough to be a useful bound on an
+  /// unresponsive server will also drop connections a person was about to
+  /// accept.
   final Duration? handshakeTimeout;
 
   /// Maximum time to wait for authentication after the transport is ready.
+  ///
+  /// Null by default, with the same consequence described on
+  /// [handshakeTimeout].
+  ///
+  /// Also a deadline rather than an inactivity timer, and it spans the
+  /// authentication callbacks: [onPasswordRequest] and [onUserInfoRequest] are
+  /// awaited inside it. A value picked to bound an unresponsive server will
+  /// also cut off a user who is slow typing a password, so pick it against how
+  /// long a person might take, not how long the network should take.
   final Duration? authTimeout;
 
   /// Function called when additional host keys are received. This is an OpenSSH
