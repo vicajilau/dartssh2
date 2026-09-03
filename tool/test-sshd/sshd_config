@@ -23,3 +23,8 @@ MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,h
 Subsystem sftp /usr/lib/ssh/sftp-server
 
 LogLevel VERBOSE
+
+# A pty-req this server refuses, which is what `PermitTTY no` looks like from
+# the client side. Keep this last: every keyword after a Match belongs to it.
+Match User dartssh2-nopty
+    PermitTTY no

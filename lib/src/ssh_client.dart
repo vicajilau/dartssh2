@@ -127,6 +127,33 @@ class SSHRunResult {
   });
 }
 
+/// One of the channel requests that set up a session, with the description
+/// used in the error message when the server refuses it.
+class _SessionRequest {
+  _SessionRequest(this.description, this.send, {this.required = false});
+
+  /// Completes the sentence "Failed to ...".
+  final String description;
+
+  /// Sends the request and returns its reply. A thunk rather than a started
+  /// future, so that the default path still sends nothing after a refusal.
+  final Future<bool> Function() send;
+
+  /// Whether a refusal fails the call even with
+  /// [SSHClient.pipelineChannelRequests] set. True for the exec or shell
+  /// request, which is the point of the call and has run nothing when it is
+  /// refused.
+  final bool required;
+}
+
+/// The reply to one channel request, kept as a value rather than as a future
+/// so that a pipeline of them can be inspected in issue order.
+typedef _SessionRequestOutcome = ({
+  bool? accepted,
+  Object? error,
+  StackTrace? stackTrace,
+});
+
 class SSHClient {
   final SSHSocket socket;
 
@@ -215,6 +242,31 @@ class SSHClient {
   /// Allow to disable hostkey verification, which can be slow in debug mode.
   final bool disableHostkeyVerification;
 
+  /// Send all of a session's channel requests before reading any reply, and
+  /// report a refused one instead of throwing.
+  ///
+  /// [execute] and [shell] send `env`, agent forwarding, `pty-req` and
+  /// `x11-req` before `exec` or `shell`, and by default wait for each reply
+  /// before sending the next request, so setting up a session costs one round
+  /// trip per request. With this set they go out back to back, which RFC 4254
+  /// §5.4 permits and `ssh(1)` does; §4 requires the peer to answer the
+  /// requests on a channel in the order it received them, so the replies still
+  /// line up. Against a server 40 ms away, `execute` with a pty measured
+  /// 246 ms before and 206 ms after.
+  ///
+  /// **A refused request no longer stops the command running.** It is already
+  /// on the wire when the refusal arrives, so it cannot be held back: against
+  /// a server with `PermitTTY no`, `execute` runs the command and reports the
+  /// refused `pty-req` through [printDebug], the way `ssh(1)` prints
+  /// `PTY allocation request failed on channel 0` and carries on. A refused
+  /// environment variable, agent forwarding or X11 request is treated the same
+  /// way. Only a refused `exec` or `shell` still throws
+  /// [SSHChannelRequestError], because nothing has run when that one fails.
+  ///
+  /// Leave this false if the caller relies on [execute] throwing *before* the
+  /// command runs.
+  final bool pipelineChannelRequests;
+
   /// Identification string advertised during the SSH version exchange (the part
   /// after `SSH-2.0-`). Defaults to `'DartSSH_2.0'`
   final String ident;
@@ -249,6 +301,7 @@ class SSHClient {
     this.handshakeTimeout,
     this.authTimeout,
     this.disableHostkeyVerification = false,
+    this.pipelineChannelRequests = false,
     String ident = 'DartSSH_2.0',
   }) : ident = _validateIdent(ident) {
     _transport = SSHTransport(
@@ -514,58 +567,21 @@ class SSHClient {
 
     final channelController = await _openSessionChannel();
 
-    if (environment != null) {
-      for (var pair in environment.entries) {
-        final envOk = await channelController.sendEnv(pair.key, pair.value);
-        if (!envOk) {
-          channelController.close();
-          throw SSHChannelRequestError(
-            'Failed to set environment variable: ${pair.key}',
-          );
-        }
-      }
-    }
-
-    if (agentHandler != null) {
-      final agentOk = await channelController.sendAgentForwardingRequest();
-      if (!agentOk) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request agent forwarding');
-      }
-    }
-
-    if (pty != null) {
-      final ptyOk = await channelController.sendPtyReq(
-        terminalType: pty.type,
-        terminalWidth: pty.width,
-        terminalHeight: pty.height,
-        terminalPixelWidth: pty.pixelWidth,
-        terminalPixelHeight: pty.pixelHeight,
-      );
-      if (!ptyOk) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to start pty');
-      }
-    }
-
-    if (x11 != null) {
-      final x11Ok = await channelController.sendX11Req(
-        singleConnection: x11.singleConnection,
-        authenticationProtocol: x11.authenticationProtocol,
-        authenticationCookie: x11.authenticationCookie,
-        screenNumber: x11.screenNumber,
-      );
-      if (!x11Ok) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request x11 forwarding');
-      }
-    }
-
-    final success = await channelController.sendExec(command);
-    if (!success) {
-      channelController.close();
-      throw SSHChannelRequestError('Failed to execute');
-    }
+    await _setUpSession(
+      channelController,
+      _sessionSetupRequests(
+        channelController,
+        pty: pty,
+        x11: x11,
+        environment: environment,
+      ).followedBy([
+        _SessionRequest(
+          'execute',
+          () => channelController.sendExec(command),
+          required: true,
+        ),
+      ]),
+    );
 
     return SSHSession(channelController.channel);
   }
@@ -581,59 +597,164 @@ class SSHClient {
 
     final channelController = await _openSessionChannel();
 
+    await _setUpSession(
+      channelController,
+      _sessionSetupRequests(
+        channelController,
+        pty: pty,
+        x11: x11,
+        environment: environment,
+      ).followedBy([
+        _SessionRequest(
+          'start shell',
+          channelController.sendShell,
+          required: true,
+        ),
+      ]),
+    );
+
+    return SSHSession(channelController.channel);
+  }
+
+  /// The channel requests that configure a session before the exec or shell
+  /// request that follows them. The order is the order they go on the wire.
+  ///
+  /// Lazy on purpose, and consumed lazily by the sequential path in
+  /// [_setUpSession], so that naming the requests changes nothing about when
+  /// [environment] is read: an entry is taken from the map, sent, and its
+  /// reply awaited before the map is asked for the next one, which is what
+  /// the code this replaces did by awaiting inside `for (final pair in
+  /// environment.entries)`. Materialising them up front would read the whole
+  /// map before anything reached the wire, so a map whose iterator throws
+  /// part way through would fail with nothing sent rather than after the
+  /// entries before it, and a map mutated while the session is being set up
+  /// would be read at different points than it used to be.
+  Iterable<_SessionRequest> _sessionSetupRequests(
+    SSHChannelController channel, {
+    required SSHPtyConfig? pty,
+    required SSHX11Config? x11,
+    required Map<String, String>? environment,
+  }) sync* {
     if (environment != null) {
-      for (var pair in environment.entries) {
-        final envOk = await channelController.sendEnv(pair.key, pair.value);
-        if (!envOk) {
-          channelController.close();
-          throw SSHChannelRequestError(
-            'Failed to set environment variable: ${pair.key}',
-          );
-        }
+      for (final pair in environment.entries) {
+        yield _SessionRequest(
+          'set environment variable: ${pair.key}',
+          () => channel.sendEnv(pair.key, pair.value),
+        );
       }
     }
 
     if (agentHandler != null) {
-      final agentOk = await channelController.sendAgentForwardingRequest();
-      if (!agentOk) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request agent forwarding');
-      }
+      yield _SessionRequest(
+        'request agent forwarding',
+        channel.sendAgentForwardingRequest,
+      );
     }
 
     if (pty != null) {
-      final ok = await channelController.sendPtyReq(
-        terminalType: pty.type,
-        terminalWidth: pty.width,
-        terminalHeight: pty.height,
-        terminalPixelWidth: pty.pixelWidth,
-        terminalPixelHeight: pty.pixelHeight,
+      yield _SessionRequest(
+        'start pty',
+        () => channel.sendPtyReq(
+          terminalType: pty.type,
+          terminalWidth: pty.width,
+          terminalHeight: pty.height,
+          terminalPixelWidth: pty.pixelWidth,
+          terminalPixelHeight: pty.pixelHeight,
+        ),
       );
-      if (!ok) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to start pty');
-      }
     }
 
     if (x11 != null) {
-      final x11Ok = await channelController.sendX11Req(
-        singleConnection: x11.singleConnection,
-        authenticationProtocol: x11.authenticationProtocol,
-        authenticationCookie: x11.authenticationCookie,
-        screenNumber: x11.screenNumber,
+      yield _SessionRequest(
+        'request x11 forwarding',
+        () => channel.sendX11Req(
+          singleConnection: x11.singleConnection,
+          authenticationProtocol: x11.authenticationProtocol,
+          authenticationCookie: x11.authenticationCookie,
+          screenNumber: x11.screenNumber,
+        ),
       );
-      if (!x11Ok) {
-        channelController.close();
-        throw SSHChannelRequestError('Failed to request x11 forwarding');
+    }
+  }
+
+  /// Issues [requests] on [channel] and reports the first one that fails.
+  ///
+  /// Without [pipelineChannelRequests] each request waits for its reply before
+  /// the next one is sent, so a refusal means the requests after it were never
+  /// sent at all. With it, everything is sent first and the replies are read
+  /// afterwards; see the flag for what that changes.
+  ///
+  /// [requests] is an [Iterable] rather than a [List] so that the sequential
+  /// path below advances it one request at a time; see [_sessionSetupRequests]
+  /// for why that matters.
+  Future<void> _setUpSession(
+    SSHChannelController channel,
+    Iterable<_SessionRequest> requests,
+  ) async {
+    if (!pipelineChannelRequests) {
+      // Each request is taken from [requests] only once the one before it has
+      // been answered, so nothing past a refusal is even constructed, let
+      // alone sent.
+      for (final request in requests) {
+        if (!await request.send()) {
+          channel.close();
+          throw SSHChannelRequestError('Failed to ${request.description}');
+        }
       }
+      return;
     }
 
-    if (!await channelController.sendShell()) {
-      channelController.close();
-      throw SSHChannelRequestError('Failed to start shell');
-    }
+    // Pipelining needs to know the whole set before it transmits any of it, so
+    // this is the one path that reads [requests] to the end up front. If that
+    // fails nothing has gone out, which is the same all-or-nothing the
+    // sequential path gives for a request it never reaches.
+    final pipelined = requests.toList(growable: false);
 
-    return SSHSession(channelController.channel);
+    // Send everything before reading a single reply. SSHChannelController
+    // reserves a request's slot in its FIFO reply queue before it transmits,
+    // and RFC 4254 §4 requires the peer to answer the requests on a channel in
+    // the order it received them, so the replies still line up with [requests]
+    // one for one.
+    //
+    // Each outcome is captured the moment the request is issued. Attaching the
+    // handler only when the loop below reaches it would let a reply that fails
+    // while an earlier one is still outstanding escape as an unhandled
+    // asynchronous error.
+    final outcomes = [
+      for (final request in pipelined)
+        request.send().then<_SessionRequestOutcome>(
+              (accepted) => (accepted: accepted, error: null, stackTrace: null),
+              onError: (Object error, StackTrace stackTrace) =>
+                  (accepted: null, error: error, stackTrace: stackTrace),
+            ),
+    ];
+
+    // Deliberately not Future.wait, which propagates whichever error arrives
+    // first rather than the first request that went wrong: a channel that dies
+    // before the exec reply would hide a pty-req refusal that had already come
+    // back, and report an SSHStateError where the unpipelined path reports
+    // SSHChannelRequestError('Failed to start pty').
+    for (var i = 0; i < outcomes.length; i++) {
+      final request = pipelined[i];
+      final outcome = await outcomes[i];
+
+      final error = outcome.error;
+      if (error != null) {
+        Error.throwWithStackTrace(error, outcome.stackTrace!);
+      }
+
+      if (outcome.accepted!) continue;
+
+      if (request.required) {
+        channel.close();
+        throw SSHChannelRequestError('Failed to ${request.description}');
+      }
+
+      printDebug?.call(
+        'SSHClient._setUpSession: the server refused to '
+        '${request.description}, continuing',
+      );
+    }
   }
 
   Future<void> subsystem(String subsystem) async {

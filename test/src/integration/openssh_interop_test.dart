@@ -159,6 +159,68 @@ void main() {
       });
     });
 
+    group('session request pipelining', () {
+      // The `dartssh2-nopty` account is the one the server refuses a pty to.
+      // That is the case the flag changes: by default the exec is not sent
+      // until the pty-req has been answered, so the command never runs, while
+      // a pipelined exec is already on the wire when the refusal arrives.
+      test('the default refuses to run the command without its pty', () async {
+        final marker =
+            '/tmp/dartssh2-nopty-default-${DateTime.now().microsecondsSinceEpoch}';
+        final client = await getLocalClient(username: localSshdNoPtyUser);
+
+        await expectLater(
+          client.run('touch $marker', runInPty: true),
+          throwsA(
+            isA<SSHChannelRequestError>().having(
+              (error) => error.message,
+              'message',
+              'Failed to start pty',
+            ),
+          ),
+        );
+
+        expect(await _exists(client, marker), isFalse);
+        await client.close();
+      });
+
+      test('pipelining runs the command and reports the refused pty', () async {
+        final marker =
+            '/tmp/dartssh2-nopty-pipelined-${DateTime.now().microsecondsSinceEpoch}';
+        final client = await getLocalClient(
+          username: localSshdNoPtyUser,
+          pipelineChannelRequests: true,
+        );
+
+        final output = await client.run(
+          'touch $marker; echo ran',
+          runInPty: true,
+        );
+
+        expect(String.fromCharCodes(output).trim(), 'ran');
+        expect(await _exists(client, marker), isTrue);
+
+        await client.run('rm -f $marker');
+        await client.close();
+      });
+
+      test('pipelining runs the command despite a refused env request',
+          () async {
+        // AcceptEnv is unset on this server, so it refuses every env request.
+        // By default that throws before the command is sent.
+        final client = await getLocalClient(pipelineChannelRequests: true);
+
+        final output = await client.run(
+          'echo \$DARTSSH2_PIPELINE',
+          environment: {'DARTSSH2_PIPELINE': 'set'},
+        );
+
+        // The variable never arrived, but the command still ran.
+        expect(String.fromCharCodes(output).trim(), isEmpty);
+        await client.close();
+      });
+    });
+
     test('transfers a file over SFTP', () async {
       final client = await getLocalClient();
       final sftp = await client.sftp();
@@ -180,4 +242,10 @@ void main() {
       await client.close();
     });
   }, skip: skipWithoutLocalSshd);
+}
+
+/// Whether [path] exists on the remote side.
+Future<bool> _exists(SSHClient client, String path) async {
+  final output = await client.run('test -e $path && echo yes || echo no');
+  return String.fromCharCodes(output).trim() == 'yes';
 }

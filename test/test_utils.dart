@@ -37,6 +37,10 @@ const localSshdPort = 2222;
 const localSshdUser = 'dartssh2';
 const localSshdPassword = 'dartssh2-test-password';
 
+/// An account on the same server that `PermitTTY no` applies to, so a pty-req
+/// is answered with SSH_MSG_CHANNEL_FAILURE.
+const localSshdNoPtyUser = 'dartssh2-nopty';
+
 /// Whether the local OpenSSH server is running. CI sets this.
 bool get hasLocalSshd => Platform.environment['DARTSSH2_LOCAL_SSHD'] == '1';
 
@@ -49,12 +53,15 @@ Object? get skipWithoutLocalSshd => hasLocalSshd
 /// A client connected to the OpenSSH server started by CI.
 Future<SSHClient> getLocalClient({
   SSHAlgorithms algorithms = const SSHAlgorithms(),
+  String username = localSshdUser,
+  bool pipelineChannelRequests = false,
 }) async {
   return SSHClient(
     await SSHSocket.connect(localSshdHost, localSshdPort),
-    username: localSshdUser,
+    username: username,
     onPasswordRequest: () => localSshdPassword,
     algorithms: algorithms,
+    pipelineChannelRequests: pipelineChannelRequests,
   );
 }
 
