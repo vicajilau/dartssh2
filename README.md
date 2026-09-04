@@ -22,7 +22,7 @@ SSH and SFTP client written in pure Dart, aiming to be feature-rich as well as e
 
 ## ✨ Features
 
--  **Pure Dart**: Working with both Dart VM and Flutter.
+-  **Pure Dart**: Runs on the Dart VM, Flutter and the web. Browser support is checked in CI against a real OpenSSH server, see [Web support](#web-support).
 -  **SSH Session**: Executing commands, spawning shells, setting environment variables, pseudo terminals, etc.
 -  **Authentication**: Supports password, in-memory private keys (`SSHKeyPair`), external asynchronous identities (`SSHIdentity` for Secure Enclave, YubiKey/FIDO2, smart cards, OS agents), RFC 4252 §7.8 public-key probing, RFC 4252 §9 hostbased authentication, and keyboard-interactive authentication.
 -  **Forwarding**: Supports local forwarding, remote forwarding, and dynamic forwarding (SOCKS5 CONNECT).
@@ -167,30 +167,34 @@ already trust end to end.
 
 ### Web support
 
-Direct native TCP sockets are not available in browsers, so this will fail on
-Flutter Web / Dart Web:
+dartssh2 runs on Flutter Web and Dart Web. The protocol, authentication,
+sessions, channel forwarding and SFTP all work compiled to JavaScript, and CI
+checks it rather than assuming it: on every pull request a browser completes a
+handshake, runs a command, holds an `aes256-gcm` session and round-trips a file
+over SFTP against a real OpenSSH server.
+
+**You have to supply the transport.** Browsers cannot open TCP sockets, so this
+fails:
 
 ```dart
 await SSHSocket.connect('host', 22);
 ```
 
-For web apps, use a custom `SSHSocket` transport over a browser-supported
-channel (for example, a WebSocket tunnel/proxy to your SSH endpoint).
+`SSHSocket` is an interface, so give it something a browser does have, normally
+a WebSocket to a proxy that bridges to your SSH endpoint. For a minimal working
+pair of both ends, see [`tool/ws_bridge.dart`](tool/ws_bridge.dart) and the
+socket in
+[`test/src/integration/web_interop_test.dart`](test/src/integration/web_interop_test.dart).
 
-Before 4.0.0 that was all it said, and it was not enough: every AEAD cipher and
-the whole of SFTP went through `ByteData.getUint64`/`setUint64`, which throw
-under dart2js, so a browser connection died at the first encrypted packet even
-with a correct transport. That is fixed, and a `dart test -p chrome` job now
-guards it.
+Two things are not available in a browser:
 
-Two caveats remain. `chacha20-poly1305@openssh.com` cannot be used on the web,
-because PointyCastle's Poly1305 requires full-width 64-bit integers. It sits
-third in the default cipher list, so AES-GCM or AES-CTR is normally negotiated
-and nothing needs doing. Only pinning ChaCha20-Poly1305 explicitly will fail.
-
-And `SftpFile.downloadToRandomAccess` is not available, since it takes a
-`dart:io` `RandomAccessFile` and there is no local file to hand it. Use
-`SftpFile.downloadTo`, which takes a sink, or `SftpFile.read`.
+- `chacha20-poly1305@openssh.com`, because PointyCastle's Poly1305 needs
+  full-width 64-bit integers. It sits third in the default cipher list, so
+  AES-GCM or AES-CTR is negotiated instead and nothing needs doing. Only
+  pinning it explicitly will fail.
+- `SftpFile.downloadToRandomAccess`, which takes a `dart:io`
+  `RandomAccessFile`, and there is no local file to hand it. Use
+  `SftpFile.downloadTo`, which takes a sink, or `SftpFile.read`.
 
 ### Customize client SSH identification
 
