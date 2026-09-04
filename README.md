@@ -183,10 +183,14 @@ under dart2js, so a browser connection died at the first encrypted packet even
 with a correct transport. That is fixed, and a `dart test -p chrome` job now
 guards it.
 
-One caveat remains. `chacha20-poly1305@openssh.com` cannot be used on the web,
+Two caveats remain. `chacha20-poly1305@openssh.com` cannot be used on the web,
 because PointyCastle's Poly1305 requires full-width 64-bit integers. It sits
 third in the default cipher list, so AES-GCM or AES-CTR is normally negotiated
 and nothing needs doing. Only pinning ChaCha20-Poly1305 explicitly will fail.
+
+And `SftpFile.downloadToRandomAccess` is not available, since it takes a
+`dart:io` `RandomAccessFile` and there is no local file to hand it. Use
+`SftpFile.downloadTo`, which takes a sink, or `SftpFile.read`.
 
 ### Customize client SSH identification
 
