@@ -1,9 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:convert/convert.dart';
+import 'package:meta/meta.dart';
 import 'package:dartssh2/src/sftp/sftp_errors.dart';
 import 'package:dartssh2/src/sftp/sftp_file_attrs.dart';
 import 'package:dartssh2/src/sftp/sftp_file_open_mode.dart';

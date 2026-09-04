@@ -25,6 +25,7 @@ dev_dependencies:
   build_runner: ^2.4.12
   lints: ">=4.0.0 <7.0.0"
   test: ^1.25.15
+  web: ^1.1.1
 
 false_secrets:
   - test

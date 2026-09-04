@@ -31,6 +31,11 @@ export 'src/sftp/sftp_file_attrs.dart';
 export 'src/sftp/sftp_name.dart';
 export 'src/sftp/sftp_status_code.dart';
 export 'src/sftp/sftp_stream_io.dart';
+// Adds SftpFile.downloadToRandomAccess where dart:io exists. Kept behind a
+// conditional export so that naming RandomAccessFile does not make the whole
+// package read as web-incompatible on pub.dev.
+export 'src/sftp/sftp_file_io_stub.dart'
+    if (dart.library.io) 'src/sftp/sftp_file_io.dart';
 
 export 'src/http/http_client.dart';
 export 'src/http/http_exception.dart';

@@ -112,3 +112,37 @@ jobs:
 
       - name: Run unit tests compiled to JavaScript (chrome)
         run: dart test -p chrome --exclude-tags=integration
+
+      # Everything above proves the pieces compile and behave under dart2js.
+      # None of it puts a packet on a wire, which is the gap that let every
+      # AEAD cipher and the whole of SFTP sit broken on the web until 4.0.0.
+      # The steps below run the browser against the same OpenSSH server the VM
+      # interop tests use, through a WebSocket bridge, because a browser has no
+      # TCP socket of its own. That is also what the README tells web users to
+      # write, so the test doubles as a worked example of it.
+      - name: Start a local OpenSSH server
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: tool/start_test_sshd.sh
+
+      - name: Start the WebSocket bridge
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          dart run tool/ws_bridge.dart &
+          for _ in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/8022) 2>/dev/null; then
+              exec 3<&- 3>&-
+              echo "bridge is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "bridge did not come up in time" >&2
+          exit 1
+
+      - name: Run interop tests in a browser against the real server
+        if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: dart test -p chrome --tags=integration
+
+      - name: Stop the local OpenSSH server
+        if: always()
+        run: docker rm -f dartssh2-test-sshd || true

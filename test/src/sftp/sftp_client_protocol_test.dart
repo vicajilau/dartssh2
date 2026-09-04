@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/sftp/sftp_client.dart';
+import 'package:dartssh2/src/sftp/sftp_file_io.dart';
 import 'package:dartssh2/src/sftp/sftp_errors.dart';
 import 'package:dartssh2/src/sftp/sftp_file_attrs.dart';
 import 'package:dartssh2/src/sftp/sftp_packet.dart';
