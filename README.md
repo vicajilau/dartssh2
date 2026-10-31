@@ -247,6 +247,36 @@ connection, and a server that presents a different one has the connection
 terminated with `SSHHostkeyError`, as OpenSSH does. `onVerifyHostKey` is
 consulted once per connection, not once per exchange.
 
+### Configure authentication methods and retries
+
+Use `preferredAuthMethods` as an ordered allow-list. Methods omitted from the
+list are disabled; methods without matching credentials or callbacks are skipped.
+Include `SSHAuthMethod.none` first to ask the server which methods can continue
+before offering credentials. Omitting these options preserves the default policy.
+
+```dart
+final client = SSHClient(
+  socket,
+  username: 'user',
+  preferredAuthMethods: const [
+    SSHAuthMethod.none,
+    SSHAuthMethod.keyboardInteractive,
+    SSHAuthMethod.password,
+  ],
+  maxPasswordAttempts: 2,
+  maxKeyboardInteractiveAttempts: 2,
+  onPasswordRequest: () => promptForPassword(),
+  onUserInfoRequest: (request) => promptForResponses(request),
+);
+```
+
+Both attempt limits must be positive and apply per authentication factor on the
+same connection. A keyboard-interactive attempt is a complete conversation, which
+can contain multiple prompt rounds. Returning `null` from a credential callback
+skips that method for the current factor. Partial success resets the attempt
+budgets for the next factor; a public key that completed a factor is excluded
+from later factors. The server may impose a lower limit or close the connection.
+
 ### Configure handshake and authentication timeouts
 
 You can specify optional timeouts for the transport handshake and user authentication:

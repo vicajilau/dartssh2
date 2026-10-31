@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/http/http_client.dart';
@@ -210,6 +211,28 @@ class SSHClient {
   /// null to skip to the next available authentication method.
   final SSHUserInfoRequestHandler? onUserInfoRequest;
 
+  /// Ordered allow-list of authentication methods. Omitted methods are disabled.
+  ///
+  /// Null preserves the default preference. Methods without credentials or a
+  /// callback are skipped. Include [SSHAuthMethod.none] first to discover the
+  /// server's allowed methods before offering credentials. Duplicate entries
+  /// are ignored, and the supplied list is copied.
+  final List<SSHAuthMethod>? preferredAuthMethods;
+
+  /// Maximum password authentication requests per factor. Must be positive.
+  ///
+  /// A null callback result skips the method regardless of this budget. A
+  /// password-change exchange belongs to the same attempt. Partial success
+  /// starts a new factor with a fresh budget.
+  final int maxPasswordAttempts;
+
+  /// Maximum keyboard-interactive conversations per factor. Must be positive.
+  ///
+  /// Additional prompts in the same conversation do not consume attempts.
+  /// Only a server rejection starts another conversation. Returning null from
+  /// [onUserInfoRequest] skips the method for the current factor.
+  final int maxKeyboardInteractiveAttempts;
+
   /// The SSH server may send banner message at any time before authentication
   /// is successful. Set this field to receive the banner message.
   final SSHUserauthBannerHandler? onUserauthBanner;
@@ -294,6 +317,9 @@ class SSHClient {
     this.onPasswordRequest,
     this.onChangePasswordRequest,
     this.onUserInfoRequest,
+    List<SSHAuthMethod>? preferredAuthMethods,
+    int maxPasswordAttempts = 1,
+    int maxKeyboardInteractiveAttempts = 1,
     this.onUserauthBanner,
     this.onAuthenticated,
     this.onX11Forward,
@@ -304,7 +330,14 @@ class SSHClient {
     this.disableHostkeyVerification = false,
     this.pipelineChannelRequests = false,
     String ident = 'DartSSH_2.0',
-  }) : ident = _validateIdent(ident) {
+  })  : ident = _validateIdent(ident),
+        preferredAuthMethods = preferredAuthMethods == null
+            ? null
+            : List.unmodifiable(preferredAuthMethods.toSet()),
+        maxPasswordAttempts =
+            _validateAuthAttempts(maxPasswordAttempts, 'maxPasswordAttempts'),
+        maxKeyboardInteractiveAttempts = _validateAuthAttempts(
+            maxKeyboardInteractiveAttempts, 'maxKeyboardInteractiveAttempts') {
     _transport = SSHTransport(
       socket,
       isServer: false,
@@ -342,6 +375,13 @@ class SSHClient {
     if (handshakeTimeout != null) {
       _handshakeTimeoutTimer = Timer(handshakeTimeout, _handleHandshakeTimeout);
     }
+  }
+
+  static int _validateAuthAttempts(int attempts, String name) {
+    if (attempts <= 0) {
+      throw ArgumentError.value(attempts, name, 'must be positive');
+    }
+    return attempts;
   }
 
   static String _validateIdent(String ident) {
@@ -392,6 +432,19 @@ class SSHClient {
   final _preferredAuthMethods = <SSHAuthMethod>[];
 
   final _exhaustedAuthMethods = <SSHAuthMethod>{};
+
+  final _completedPublicKeys = <String>{};
+
+  String? _currentPublicKey;
+
+  var _passwordAttempts = 0;
+
+  var _keyboardInteractiveAttempts = 0;
+
+  var _authGeneration = 0;
+
+  bool _isAuthCurrent(int generation) =>
+      !isClosed && !_authenticated.isCompleted && generation == _authGeneration;
 
   final _identitiesLeft = Queue<SSHIdentity>();
 
@@ -1045,8 +1098,11 @@ class SSHClient {
   }
 
   void _catch(FutureOr<dynamic> Function() fn) {
+    final generation = _authGeneration;
     Future.sync(fn).catchError((e, st) {
-      _transport.closeWithError(SSHInternalError(e), st);
+      if (_isAuthCurrent(generation)) {
+        _transport.closeWithError(SSHInternalError(e), st);
+      }
     });
   }
 
@@ -1129,6 +1185,7 @@ class SSHClient {
   }
 
   void _handleUserauthSuccess() {
+    if (isClosed || _authenticated.isCompleted) return;
     printTrace?.call('<- $socket: SSH_Message_Userauth_Success');
     printDebug?.call('SSHClient._handleUserauthSuccess');
     _authTimeoutTimer?.cancel();
@@ -1157,6 +1214,8 @@ class SSHClient {
   }
 
   void _handleUserauthFailure(Uint8List payload) {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
     final message = SSH_Message_Userauth_Failure.decode(payload);
     printTrace?.call('<- $socket: $message');
     printDebug?.call('SSHClient._handleUserauthFailure');
@@ -1167,6 +1226,8 @@ class SSHClient {
         'Authentication partially succeeded with '
         '${_currentAuthMethod?.name}',
       );
+      final publicKey = _currentPublicKey;
+      if (publicKey != null) _completedPublicKeys.add(publicKey);
       _resetAuthStateForNextFactor();
     } else {
       _markCurrentAuthMethodAttempted();
@@ -1186,6 +1247,8 @@ class SSHClient {
   }
 
   void _handleUserauthIntermidiate(Uint8List payload) {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
     printDebug?.call('SSHClient._handleUserauthIntermidiate');
 
     switch (_currentAuthMethod) {
@@ -1201,6 +1264,7 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthPKOk(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthPKOk');
     final message = SSH_Message_Userauth_PK_Ok.decode(payload);
     printTrace?.call('<- $socket: $message');
@@ -1219,10 +1283,11 @@ class SSHClient {
 
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.publicKey) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
+    _currentPublicKey = base64Encode(publicKeyBlob);
     _sendMessage(
       SSH_Message_Userauth_Request.publicKey(
         username: username,
@@ -1234,11 +1299,13 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthPasswordChangeRequest(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthPasswordChangeRequest');
     final message = SSH_Message_Userauth_Passwd_ChangeReq.decode(payload);
     printTrace?.call('<- $socket: $message');
 
-    final response = await onChangePasswordRequest!(message.prompt);
+    final response = await onChangePasswordRequest?.call(message.prompt);
+    if (!_isAuthCurrent(generation)) return;
     if (response == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.password);
       return _tryNextAuthMethod();
@@ -1252,6 +1319,7 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthInfoRequest(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthInfoRequest');
     final message = SSH_Message_Userauth_InfoRequest.decode(payload);
     printTrace?.call('<- $socket: $message');
@@ -1260,6 +1328,7 @@ class SSHClient {
       SSHUserInfoRequest(message.name, message.instruction, message.prompts),
     );
 
+    if (!_isAuthCurrent(generation)) return;
     if (responses == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.keyboardInteractive);
       return _tryNextAuthMethod();
@@ -1563,33 +1632,27 @@ class SSHClient {
   void _startAuthentication() {
     printDebug?.call('SSHClient._startAuthentication');
 
-    if (identities != null && identities!.isNotEmpty) {
-      _preferredAuthMethods.add(SSHAuthMethod.publicKey);
-    }
-
-    if (onPasswordRequest != null) {
-      _preferredAuthMethods.add(SSHAuthMethod.password);
-    }
-
-    if (onUserInfoRequest != null) {
-      _preferredAuthMethods.add(SSHAuthMethod.keyboardInteractive);
-    }
-
-    if (hostbasedIdentities != null &&
-        hostbasedIdentities!.isNotEmpty &&
-        hostName != null &&
-        userNameOnClientHost != null) {
-      _preferredAuthMethods.add(SSHAuthMethod.hostbased);
-    }
-
-    _authMethodsLeft
-      ..addAll(_preferredAuthMethods)
-      ..add(SSHAuthMethod.none);
+    final preference = preferredAuthMethods ??
+        const [
+          SSHAuthMethod.publicKey,
+          SSHAuthMethod.password,
+          SSHAuthMethod.keyboardInteractive,
+          SSHAuthMethod.hostbased,
+          SSHAuthMethod.none,
+        ];
+    final available = _availableAuthMethods;
+    _preferredAuthMethods.addAll(preference.where(
+      (method) => method == SSHAuthMethod.none || available.contains(method),
+    ));
+    _authMethodsLeft.addAll(_preferredAuthMethods);
 
     _tryNextAuthMethod();
   }
 
   void _tryNextAuthMethod() {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
+    _currentPublicKey = null;
     printDebug?.call('SSHClient._tryNextAuthenticationMethod');
 
     if (_authMethodsLeft.isEmpty) {
@@ -1622,21 +1685,25 @@ class SSHClient {
   }
 
   Future<void> _authWithPassword() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithPassword');
 
     final password = await onPasswordRequest!();
+    if (!_isAuthCurrent(generation)) return;
     if (password == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.password);
       _tryNextAuthMethod();
       return;
     }
 
+    _passwordAttempts++;
     _sendMessage(
       SSH_Message_Userauth_Request.password(user: username, password: password),
     );
   }
 
   Future<void> _authWithNextPublicKey() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithPublicKey');
 
     if (_identitiesLeft.isEmpty) {
@@ -1674,10 +1741,11 @@ class SSHClient {
 
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.publicKey) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
+    _currentPublicKey = base64Encode(publicKeyBlob);
     _sendMessage(
       SSH_Message_Userauth_Request.publicKey(
         username: username,
@@ -1690,12 +1758,14 @@ class SSHClient {
 
   void _authWithKeyboardInteractive() {
     printDebug?.call('SSHClient._authWithKeyboardInteractive');
+    _keyboardInteractiveAttempts++;
     _sendMessage(
       SSH_Message_Userauth_Request.keyboardInteractive(user: username),
     );
   }
 
   Future<void> _authWithNextHostbased() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithHostbased');
 
     if (_hostbasedIdentitiesLeft.isEmpty) {
@@ -1716,7 +1786,7 @@ class SSHClient {
     );
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.hostbased) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
@@ -1750,7 +1820,15 @@ class SSHClient {
   void _markCurrentAuthMethodAttempted() {
     switch (_currentAuthMethod) {
       case SSHAuthMethod.password:
+        if (_passwordAttempts >= maxPasswordAttempts) {
+          _exhaustedAuthMethods.add(SSHAuthMethod.password);
+        }
+        break;
       case SSHAuthMethod.keyboardInteractive:
+        if (_keyboardInteractiveAttempts >= maxKeyboardInteractiveAttempts) {
+          _exhaustedAuthMethods.add(SSHAuthMethod.keyboardInteractive);
+        }
+        break;
       case SSHAuthMethod.none:
         _exhaustedAuthMethods.add(_currentAuthMethod!);
         break;
@@ -1771,12 +1849,17 @@ class SSHClient {
 
   void _resetAuthStateForNextFactor() {
     _exhaustedAuthMethods.clear();
-    // OpenSSH resets public-key attempt state after partial success so the
-    // next authentication factor may use publickey again. Hostbased keys are
-    // consumed as they are tried and are intentionally not replenished.
+    _passwordAttempts = 0;
+    _keyboardInteractiveAttempts = 0;
+    // Retry rejected keys for a new factor, but never reuse a key that already
+    // completed one. Hostbased identities remain consumed as they are tried.
     _identitiesLeft
       ..clear()
-      ..addAll(identities ?? const <SSHIdentity>[]);
+      ..addAll((identities ?? const <SSHIdentity>[]).where(
+        (identity) => !_completedPublicKeys.contains(
+          base64Encode(identity.toPublicKey().encode()),
+        ),
+      ));
   }
 
   Future<SSHChannelController> _openSessionChannel() {

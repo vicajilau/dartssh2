@@ -25,6 +25,25 @@ void main() {
       await client.close();
     });
 
+    test('retries a rejected password without reconnecting', () async {
+      var prompts = 0;
+      final client = SSHClient(
+        await SSHSocket.connect(localSshdHost, localSshdPort),
+        username: localSshdUser,
+        preferredAuthMethods: const [
+          SSHAuthMethod.none,
+          SSHAuthMethod.password
+        ],
+        maxPasswordAttempts: 2,
+        onPasswordRequest: () =>
+            ++prompts == 1 ? 'incorrect-password' : localSshdPassword,
+      );
+      addTearDown(client.close);
+      final output = await client.run('echo retried');
+      expect(String.fromCharCodes(output).trim(), 'retried');
+      expect(prompts, 2);
+    });
+
     // One connection per algorithm, each forced on its own, so a failure names
     // the algorithm that OpenSSH refused rather than "the handshake broke".
     for (final cipher in const [

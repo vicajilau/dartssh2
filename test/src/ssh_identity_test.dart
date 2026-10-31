@@ -602,7 +602,7 @@ void main() {
       await client.close();
     });
 
-    test('partial success resets publickey identities for the next factor',
+    test('partial success continues with a different publickey identity',
         () async {
       final socket = _FakeSSHSocket();
       var signCount = 0;
@@ -617,7 +617,17 @@ void main() {
       final client = SSHClient(
         socket,
         username: 'test-user',
-        identities: [identity],
+        identities: [
+          identity,
+          SSHIdentity.custom(
+            type: 'ssh-ed25519',
+            publicKey: SSHRawHostKey(Uint8List.fromList([7, 8, 9])),
+            signer: (_) {
+              signCount++;
+              return SSHRawSignature(Uint8List.fromList([4, 5, 6]));
+            },
+          ),
+        ],
       );
       client.sessionId = Uint8List(32);
 
