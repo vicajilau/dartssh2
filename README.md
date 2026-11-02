@@ -34,63 +34,45 @@ SSH and SFTP client written in pure Dart, aiming to be feature-rich as well as e
 <table>
   <tr>
     <!-- ServerBox -->
-    <td style="text-align: center;">
-      <b><a href="https://github.com/LollipopKit/flutter_server_box">ServerBox</a></b>
+    <td align="center" width="33%">
+      <b><a href="https://github.com/LollipopKit/flutter_server_box">ServerBox</a></b><br>
+      <img src="https://raw.githubusercontent.com/vicajilau/dartssh2/main/media/showcase-1-serverbox.1.jpg" width="120px" alt="ServerBox interface displaying connection management options">
+      <img src="https://raw.githubusercontent.com/vicajilau/dartssh2/main/media/showcase-1-serverbox.2.png" width="120px" alt="ServerBox user interface for server control and monitoring">
     </td>
     <!-- NoPorts -->
-    <td style="text-align: center;">
-      <b><a href="https://github.com/atsign-foundation/noports">NoPorts</a></b>
+    <td align="center" width="33%">
+      <b><a href="https://github.com/atsign-foundation/noports">NoPorts</a></b><br>
+      <a href="https://asciinema.org/a/496148">
+        <img src="https://user-images.githubusercontent.com/6131216/185263634-07e8dba7-b5a8-44fc-ac44-8703e247143f.png" width="260px" alt="NoPorts demo showcasing SSH connectivity without open ports">
+      </a>
     </td>
     <!-- dartShell -->
-    <td style="text-align: center;">
-      <b><a href="https://github.com/hsduren/dartshell">DartShell</a></b>
-    </td>
-    <!-- Naviterm -->
-    <td style="text-align: center;">
-      <b><a href="https://github.com/jc-hk-1916/NaviTerm">Naviterm</a></b>
-    </td>
-    <!-- TealKit -->
-    <td style="text-align: center;">
-      <b><a href="https://github.com/lschaffer/tealkit">TealKit</a></b>
-    </td>
-    <!-- ZestSSH -->
-    <td style="text-align: center;">
-      <b><a href="https://zestssh.com">ZestSSH</a></b>
+    <td align="center" width="33%">
+      <b><a href="https://github.com/hsduren/dartshell">DartShell</a></b><br>
+      <img src="https://raw.githubusercontent.com/hsduren/dartshell/main/info1.png" width="260px" alt="dartShell displaying terminal and session information for SSH operations">
     </td>
   </tr>
 
-  <tr> 
-    <!-- ServerBox -->
-    <td>
-      <img src="https://raw.githubusercontent.com/vicajilau/dartssh2/main/media/showcase-1-serverbox.1.jpg" width="150px" alt="ServerBox interface displaying connection management options">
-      <img src="https://raw.githubusercontent.com/vicajilau/dartssh2/main/media/showcase-1-serverbox.2.png" width="150px" alt="ServerBox user interface for server control and monitoring">
-    </td>
-    <!-- NoPorts -->
-    <td>
-      <a href="https://asciinema.org/a/496148">
-        <img src="https://user-images.githubusercontent.com/6131216/185263634-07e8dba7-b5a8-44fc-ac44-8703e247143f.png" width="300px" alt="NoPorts demo showcasing SSH connectivity without open ports">
-      </a>
-    </td>
-    <!-- dartShell -->
-    <td>
-      <img src="https://github.com/hsduren/dartshell/blob/main/info1.png" width="300px" alt="dartShell displaying terminal and session information for SSH operations">
-    </td>
+  <tr>
     <!-- NaviTerm -->
-    <td>
+    <td align="center" width="33%">
+      <b><a href="https://github.com/jc-hk-1916/NaviTerm">Naviterm</a></b><br>
       <a href="https://apps.apple.com/us/app/naviterm-ssh-sftp-tunnels/id6747072398">
-        <img src="https://raw.githubusercontent.com/jc-hk-1916/NaviTerm/main/images/1.png" width="300px" alt="Your all-in-one SSH terminal, SFTP client, and port forwarding tool, built from the ground up for macOS, iPhone, and iPad.">
+        <img src="https://raw.githubusercontent.com/jc-hk-1916/NaviTerm/main/images/1.png" width="260px" alt="Your all-in-one SSH terminal, SFTP client, and port forwarding tool, built from the ground up for macOS, iPhone, and iPad.">
       </a>
     </td>
     <!-- TealKit -->
-    <td>
+    <td align="center" width="33%">
+      <b><a href="https://github.com/lschaffer/tealkit">TealKit</a></b><br>
       <a href="https://github.com/lschaffer/tealkit">
-        <img src="https://github.com/lschaffer/tealkit/blob/master/images/repo/desktop_playground_ssh_test.png" width="500px" alt="TealKit multiplatform agentic AI platform utilizing isolated SSH tools">
+        <img src="https://raw.githubusercontent.com/lschaffer/tealkit/master/images/repo/desktop_playground_ssh_test.png" width="260px" alt="TealKit multiplatform agentic AI platform utilizing isolated SSH tools">
       </a>
     </td>
     <!-- ZestSSH -->
-    <td>
+    <td align="center" width="33%">
+      <b><a href="https://zestssh.com">ZestSSH</a></b><br>
       <a href="https://zestssh.com">
-        <img src="https://zestssh.com/shots/desktop-hosts-1440.webp" width="300px" alt="ZestSSH, an SSH client for Windows, macOS, Linux, Android and iOS, with SFTP, port forwarding, server monitoring and end-to-end encrypted sync">
+        <img src="https://zestssh.com/shots/desktop-hosts-1440.webp" width="260px" alt="ZestSSH, an SSH client for Windows, macOS, Linux, Android and iOS, with SFTP, port forwarding, server monitoring and end-to-end encrypted sync">
       </a>
     </td>
   </tr>
