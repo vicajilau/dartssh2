@@ -203,7 +203,9 @@ class SSHClient {
 
   /// Set this field to enable setting new passwords when the server requests
   /// changing password when using the 'password' authentication method. Return
-  /// null to skip to the next available authentication method.
+  /// null to skip to the next available authentication method. Leaving it
+  /// unset does the same: the password method is given up and authentication
+  /// continues with the next available one.
   final SSHChangePasswordRequestHandler? onChangePasswordRequest;
 
   /// Set this field to enable the 'keyboard-interactive' authentication method.
@@ -1304,6 +1306,8 @@ class SSHClient {
     final message = SSH_Message_Userauth_Passwd_ChangeReq.decode(payload);
     printTrace?.call('<- $socket: $message');
 
+    // A server may ask for a new password whether or not the application can
+    // provide one, so a missing handler declines the change like a null reply.
     final response = await onChangePasswordRequest?.call(message.prompt);
     if (!_isAuthCurrent(generation)) return;
     if (response == null) {
