@@ -1,9 +1,4 @@
-// Uses dart:mirrors, which is VM-only.
-@TestOn('vm')
-library;
-
 import 'dart:async';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -235,41 +230,21 @@ SSH_Message_Channel_Confirmation _confirmation(int recipientChannel) {
   );
 }
 
-Future<SSHChannelController> _openSessionChannel(SSHClient client) {
-  return reflect(client)
-          .invoke(_clientSymbol('_openSessionChannel'), const []).reflectee
-      as Future<SSHChannelController>;
-}
+Future<SSHChannelController> _openSessionChannel(SSHClient client) =>
+    client.testHooks.openSessionChannel();
 
 /// The channel IDs with an open still awaiting a confirmation or failure.
-Iterable _pendingChannelOpens(SSHClient client) {
-  final pending =
-      reflect(client).getField(_clientSymbol('_pendingChannelOpens')).reflectee;
-  return reflect(pending).getField(#keys).reflectee as Iterable;
-}
+Iterable<SSHChannelId> _pendingChannelOpens(SSHClient client) =>
+    client.testHooks.pendingChannelOpens;
 
-Map _openChannels(SSHClient client) {
-  return reflect(client).getField(_clientSymbol('_channels')).reflectee as Map;
-}
+Map<SSHChannelId, SSHChannelController> _openChannels(SSHClient client) =>
+    client.testHooks.channels;
 
-Set _allocatedChannelIds(SSHClient client) {
-  final allocator =
-      reflect(client).getField(_clientSymbol('_channelIdAllocator')).reflectee;
-  final library = reflectClass(SSHChannelIdAllocator).owner as LibraryMirror;
-  final symbol = MirrorSystem.getSymbol('_allocated', library);
-  return reflect(allocator).getField(symbol).reflectee as Set;
-}
-
-Symbol _clientSymbol(String name) {
-  final library = reflectClass(SSHClient).owner as LibraryMirror;
-  return MirrorSystem.getSymbol(name, library);
-}
+Set<SSHChannelId> _allocatedChannelIds(SSHClient client) =>
+    client.testHooks.channelIdAllocator.allocatedIds;
 
 void _disableRekeyBuffer(SSHClient client) {
-  final transport = reflect(client).getField(_clientSymbol('_transport'));
-  final library = transport.type.owner as LibraryMirror;
-  final symbol = MirrorSystem.getSymbol('_kexInProgress', library);
-  transport.setField(symbol, false);
+  client.testHooks.transport.testHooks.kexInProgress = false;
 }
 
 class _FakeSSHSocket implements SSHSocket {

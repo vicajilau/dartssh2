@@ -282,6 +282,11 @@ class SSHClient {
   /// true if the connection is closed normally or due to an error.
   bool get isClosed => _transport.isClosed;
 
+  /// Internal state, for this package's own tests only. See
+  /// [SSHClientTestHooks].
+  @visibleForTesting
+  SSHClientTestHooks get testHooks => SSHClientTestHooks._(this);
+
   SSHClient(
     this.socket, {
     required this.username,
@@ -1885,6 +1890,49 @@ class SSHClient {
       'Received channel open $replyType for non-opening channel $id',
     );
   }
+}
+
+/// Internal state of an [SSHClient], for this package's own tests.
+///
+/// Those tests run without a server, so they cannot complete a key exchange
+/// and need to reach the states that follow one directly. This is not part of
+/// the public API: it is hidden from `package:dartssh2/dartssh2.dart` and may
+/// change in any release.
+@visibleForTesting
+class SSHClientTestHooks {
+  SSHClientTestHooks._(this._client);
+
+  final SSHClient _client;
+
+  SSHTransport get transport => _client._transport;
+
+  Map<SSHChannelId, SSHChannelController> get channels => _client._channels;
+
+  Iterable<SSHChannelId> get pendingChannelOpens =>
+      _client._pendingChannelOpens.keys;
+
+  SSHChannelIdAllocator get channelIdAllocator => _client._channelIdAllocator;
+
+  void handleTransportReady() => _client._handleTransportReady();
+
+  void handleTransportClosed(SSHError? error) =>
+      _client._handleTransportClosed(error);
+
+  Future<SSHChannelController> openSessionChannel() =>
+      _client._openSessionChannel();
+
+  SSHChannelController acceptChannel({
+    required SSHChannelId localChannelId,
+    required SSHChannelId remoteChannelId,
+    required int remoteInitialWindowSize,
+    required int remoteMaximumPacketSize,
+  }) =>
+      _client._acceptChannel(
+        localChannelId: localChannelId,
+        remoteChannelId: remoteChannelId,
+        remoteInitialWindowSize: remoteInitialWindowSize,
+        remoteMaximumPacketSize: remoteMaximumPacketSize,
+      );
 }
 
 class SSHRemoteForward {

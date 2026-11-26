@@ -11,6 +11,7 @@ import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/ssh_message.dart';
 import 'package:dartssh2/src/utils/stream.dart';
 import 'package:dartssh2/src/utils/terminal_state.dart';
+import 'package:meta/meta.dart';
 
 const _maxChannelWindow = 0xffffffff;
 
@@ -119,6 +120,10 @@ class SSHChannelController {
   late final _requestReplyQueue = AsyncQueue<bool>(
     terminalState: _terminalState,
   );
+
+  /// The replies this channel has asked for and not yet received.
+  @visibleForTesting
+  AsyncQueue<bool> get requestReplyQueue => _requestReplyQueue;
 
   /// true if we have sent an EOF message to the remote side.
   var _hasSentEOF = false;

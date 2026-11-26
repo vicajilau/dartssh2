@@ -1,9 +1,4 @@
-// Uses dart:mirrors, which is VM-only.
-@TestOn('vm')
-library;
-
 import 'dart:async';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -16,45 +11,6 @@ import 'package:dartssh2/src/ssh_packet.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final transportLibrary = reflectClass(SSHTransport).owner as LibraryMirror;
-  final packetLibrary = reflectClass(SSHPacketSN).owner as LibraryMirror;
-
-  Symbol privateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, transportLibrary);
-  Symbol packetPrivateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, packetLibrary);
-
-  void setPrivate(SSHTransport transport, String field, Object? value) {
-    reflect(transport).setField(privateSymbol(field), value);
-  }
-
-  T getPrivate<T>(SSHTransport transport, String field) {
-    return reflect(transport).getField(privateSymbol(field)).reflectee as T;
-  }
-
-  int sequenceValue(SSHTransport transport, String field) {
-    final sequence =
-        reflect(transport).getField(privateSymbol(field)).reflectee;
-    return reflect(sequence).getField(packetPrivateSymbol('_value')).reflectee
-        as int;
-  }
-
-  void setSequenceValue(SSHTransport transport, String field, int value) {
-    final sequence =
-        reflect(transport).getField(privateSymbol(field)).reflectee;
-    reflect(sequence).setField(packetPrivateSymbol('_value'), value);
-  }
-
-  Future<void> invokePrivate(
-    SSHTransport transport,
-    String method,
-    List<Object?> args,
-  ) async {
-    final result = reflect(transport).invoke(privateSymbol(method), args);
-    final value = result.reflectee;
-    if (value is Future) await value;
-  }
-
   /// Decodes the KEXINIT that the transport wrote to [socket] during the
   /// handshake, stripping the RFC 4253 packet framing.
   SSH_Message_KexInit sentKexInit(_CaptureSSHSocket socket) {
@@ -111,7 +67,7 @@ void main() {
 
       // A server only sends its KEXINIT after seeing the peer version, so
       // trigger it explicitly.
-      reflect(transport).invoke(privateSymbol('_sendKexInit'), const []);
+      transport.testHooks.sendKexInit();
 
       final packet = socket.packets[1];
       final paddingLength = SSHPacket.readPaddingLength(packet);
@@ -135,12 +91,12 @@ void main() {
 
       // Simulate the initial exchange having finished, so the next
       // _sendKexInit is a re-key rather than a no-op.
-      setPrivate(transport, '_isFirstKex', false);
-      setPrivate(transport, '_kexInProgress', false);
-      setPrivate(transport, '_sentKexInit', false);
+      transport.testHooks.isFirstKex = false;
+      transport.testHooks.kexInProgress = false;
+      transport.testHooks.sentKexInit = false;
       socket.packets.clear();
 
-      reflect(transport).invoke(privateSymbol('_sendKexInit'), const []);
+      transport.testHooks.sendKexInit();
 
       final packet = socket.packets.last;
       final paddingLength = SSHPacket.readPaddingLength(packet);
@@ -167,14 +123,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transport.testHooks.kexInProgress = true;
+      transport.testHooks.sentKexInit = true;
 
-      await invokePrivate(transport, '_handleMessageKexInit', [
-        serverKexInit(
-          extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
-        ).encode(),
-      ]);
+      await transport.testHooks.handleMessageKexInit(serverKexInit(
+        extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
+      ).encode());
 
       expect(transport.strictKex, isTrue);
 
@@ -185,14 +139,10 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transport.testHooks.kexInProgress = true;
+      transport.testHooks.sentKexInit = true;
 
-      await invokePrivate(
-        transport,
-        '_handleMessageKexInit',
-        [serverKexInit().encode()],
-      );
+      await transport.testHooks.handleMessageKexInit(serverKexInit().encode());
 
       expect(transport.strictKex, isFalse);
 
@@ -203,16 +153,14 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transport.testHooks.kexInProgress = true;
+      transport.testHooks.sentKexInit = true;
 
       // A client must only accept the server indicator. Echoing back the
       // client one must not turn the mode on.
-      await invokePrivate(transport, '_handleMessageKexInit', [
-        serverKexInit(
-          extraKexAlgorithms: const ['kex-strict-c-v00@openssh.com'],
-        ).encode(),
-      ]);
+      await transport.testHooks.handleMessageKexInit(serverKexInit(
+        extraKexAlgorithms: const ['kex-strict-c-v00@openssh.com'],
+      ).encode());
 
       expect(transport.strictKex, isFalse);
 
@@ -223,18 +171,16 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transport.testHooks.kexInProgress = true;
+      transport.testHooks.sentKexInit = true;
       // Something was received before the KEXINIT, which is exactly the
       // packet-insertion Terrapin relies on.
-      setSequenceValue(transport, '_remotePacketSN', 1);
+      transport.testHooks.remotePacketSN.value = 1;
 
       await expectLater(
-        invokePrivate(transport, '_handleMessageKexInit', [
-          serverKexInit(
-            extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
-          ).encode(),
-        ]),
+        transport.testHooks.handleMessageKexInit(serverKexInit(
+          extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
+        ).encode()),
         throwsA(isA<SSHHandshakeError>()),
       );
 
@@ -256,13 +202,11 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_strictKex', true);
-        setPrivate(transport, '_kexInProgress', true);
+        transport.testHooks.strictKex = true;
+        transport.testHooks.kexInProgress = true;
 
         await expectLater(
-          invokePrivate(transport, '_handleMessage', [
-            entry.value,
-          ]),
+          transport.testHooks.handleMessage(entry.value),
           throwsA(isA<SSHHandshakeError>()),
         );
 
@@ -273,12 +217,10 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_strictKex', true);
-        setPrivate(transport, '_kexInProgress', false);
+        transport.testHooks.strictKex = true;
+        transport.testHooks.kexInProgress = false;
 
-        await invokePrivate(transport, '_handleMessage', [
-          entry.value,
-        ]);
+        await transport.testHooks.handleMessage(entry.value);
 
         transport.close();
       });
@@ -287,12 +229,10 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_strictKex', false);
-        setPrivate(transport, '_kexInProgress', true);
+        transport.testHooks.strictKex = false;
+        transport.testHooks.kexInProgress = true;
 
-        await invokePrivate(transport, '_handleMessage', [
-          entry.value,
-        ]);
+        await transport.testHooks.handleMessage(entry.value);
 
         transport.close();
       });
@@ -302,28 +242,28 @@ void main() {
   group('Strict key exchange sequence numbers', () {
     /// Prepares the state [_applyRemoteKeys] needs so a NEWKEYS can be handled.
     void prepareKeys(SSHTransport transport) {
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(42));
-      setPrivate(transport, '_exchangeHash',
-          Uint8List.fromList(List<int>.filled(32, 1)));
-      setPrivate(
-          transport, '_sessionId', Uint8List.fromList(List<int>.filled(32, 2)));
-      setPrivate(transport, '_clientCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_serverCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_clientMacType', SSHMacType.hmacSha256);
-      setPrivate(transport, '_serverMacType', SSHMacType.hmacSha256);
+      transport.testHooks.kexType = SSHKexType.x25519;
+      transport.testHooks.sharedSecret = BigInt.from(42);
+      transport.testHooks.exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 1));
+      transport.testHooks.sessionId =
+          Uint8List.fromList(List<int>.filled(32, 2));
+      transport.testHooks.clientCipherType = SSHCipherType.aes128ctr;
+      transport.testHooks.serverCipherType = SSHCipherType.aes128ctr;
+      transport.testHooks.clientMacType = SSHMacType.hmacSha256;
+      transport.testHooks.serverMacType = SSHMacType.hmacSha256;
     }
 
     test('local sequence number resets after sending NEWKEYS', () {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_strictKex', true);
-      setSequenceValue(transport, '_localPacketSN', 7);
+      transport.testHooks.strictKex = true;
+      transport.testHooks.localPacketSN.value = 7;
 
-      reflect(transport).invoke(privateSymbol('_sendNewKeys'), const []);
+      transport.testHooks.sendNewKeys();
 
-      expect(sequenceValue(transport, '_localPacketSN'), 0);
+      expect(transport.testHooks.localPacketSN.value, 0);
 
       transport.close();
     });
@@ -332,12 +272,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_strictKex', false);
-      setSequenceValue(transport, '_localPacketSN', 7);
+      transport.testHooks.strictKex = false;
+      transport.testHooks.localPacketSN.value = 7;
 
-      reflect(transport).invoke(privateSymbol('_sendNewKeys'), const []);
+      transport.testHooks.sendNewKeys();
 
-      expect(sequenceValue(transport, '_localPacketSN'), 8);
+      expect(transport.testHooks.localPacketSN.value, 8);
 
       transport.close();
     });
@@ -347,16 +287,16 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      setPrivate(transport, '_strictKex', true);
-      setPrivate(transport, '_remoteVersion', 'SSH-2.0-test');
-      setSequenceValue(transport, '_remotePacketSN', 9);
+      transport.testHooks.strictKex = true;
+      transport.testHooks.remoteVersion = 'SSH-2.0-test';
+      transport.testHooks.remotePacketSN.value = 9;
 
-      final dynamic buffer = getPrivate<dynamic>(transport, '_buffer');
+      final dynamic buffer = transport.testHooks.buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await invokePrivate(transport, '_processPackets', const []);
+      await transport.testHooks.processPackets();
 
-      expect(sequenceValue(transport, '_remotePacketSN'), 0);
+      expect(transport.testHooks.remotePacketSN.value, 0);
 
       transport.close();
     });
@@ -366,16 +306,16 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      setPrivate(transport, '_strictKex', false);
-      setPrivate(transport, '_remoteVersion', 'SSH-2.0-test');
-      setSequenceValue(transport, '_remotePacketSN', 9);
+      transport.testHooks.strictKex = false;
+      transport.testHooks.remoteVersion = 'SSH-2.0-test';
+      transport.testHooks.remotePacketSN.value = 9;
 
-      final dynamic buffer = getPrivate<dynamic>(transport, '_buffer');
+      final dynamic buffer = transport.testHooks.buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await invokePrivate(transport, '_processPackets', const []);
+      await transport.testHooks.processPackets();
 
-      expect(sequenceValue(transport, '_remotePacketSN'), 10);
+      expect(transport.testHooks.remotePacketSN.value, 10);
 
       transport.close();
     });
@@ -385,27 +325,27 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      setPrivate(transport, '_strictKex', true);
-      setPrivate(transport, '_remoteVersion', 'SSH-2.0-test');
-      setSequenceValue(transport, '_remotePacketSN', 9);
+      transport.testHooks.strictKex = true;
+      transport.testHooks.remoteVersion = 'SSH-2.0-test';
+      transport.testHooks.remotePacketSN.value = 9;
 
       // NEWKEYS resets to 0, then two ordinary packets take it to 2. They are
       // read as clear text because the remote keys are only applied to the
       // cipher once a non-null key is set, which this fixture does not do.
-      final dynamic buffer = getPrivate<dynamic>(transport, '_buffer');
+      final dynamic buffer = transport.testHooks.buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await invokePrivate(transport, '_processPackets', const []);
-      expect(sequenceValue(transport, '_remotePacketSN'), 0);
+      await transport.testHooks.processPackets();
+      expect(transport.testHooks.remotePacketSN.value, 0);
 
-      setPrivate(transport, '_remoteCipherKey', null);
-      setPrivate(transport, '_decryptCipher', null);
+      transport.testHooks.remoteCipherKey = null;
+      transport.testHooks.decryptCipher = null;
 
       buffer.add(clearTextPacket(Uint8List.fromList([94, 1, 2])));
       buffer.add(clearTextPacket(Uint8List.fromList([94, 3, 4])));
 
-      await invokePrivate(transport, '_processPackets', const []);
-      expect(sequenceValue(transport, '_remotePacketSN'), 2);
+      await transport.testHooks.processPackets();
+      expect(transport.testHooks.remotePacketSN.value, 2);
 
       transport.close();
     });
@@ -422,11 +362,7 @@ void main() {
         ),
       });
 
-      await invokePrivate(
-        transport,
-        '_handleMessageExtInfo',
-        [message.encode()],
-      );
+      transport.testHooks.handleMessageExtInfo(message.encode());
 
       expect(
         transport.serverSigAlgs,
@@ -446,11 +382,7 @@ void main() {
         'delay-compression': Uint8List.fromList([1, 2, 3]),
       });
 
-      await invokePrivate(
-        transport,
-        '_handleMessageExtInfo',
-        [message.encode()],
-      );
+      transport.testHooks.handleMessageExtInfo(message.encode());
 
       expect(transport.serverSigAlgs, isNull);
       expect(transport.extInfo!.keys, contains('delay-compression'));

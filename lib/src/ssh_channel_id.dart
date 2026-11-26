@@ -1,3 +1,5 @@
+import 'package:meta/meta.dart';
+
 typedef SSHChannelId = int;
 
 class SSHChannelIdAllocator {
@@ -8,6 +10,10 @@ class SSHChannelIdAllocator {
   var _nextId = 0;
 
   final _allocated = <SSHChannelId>{};
+
+  /// The ids currently allocated, so tests can check that none leak.
+  @visibleForTesting
+  Set<SSHChannelId> get allocatedIds => Set.unmodifiable(_allocated);
 
   /// Allocates a new channel id. Throw [StateError] if no more channel ids are
   /// available.

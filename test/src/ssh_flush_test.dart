@@ -3,7 +3,6 @@ library;
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
@@ -45,21 +44,12 @@ void main() {
       await client.flush();
       expect(socket.flushCount, 1);
 
-      final clientLibrary = reflectClass(SSHClient).owner as LibraryMirror;
-      Symbol privateSymbol(String name) =>
-          MirrorSystem.getSymbol(name, clientLibrary);
-
-      // Invoke _acceptChannel using reflection to verify onFlush setup.
-      final channelController = reflect(client).invoke(
-        privateSymbol('_acceptChannel'),
-        [],
-        {
-          #localChannelId: 1,
-          #remoteChannelId: 2,
-          #remoteInitialWindowSize: 1024,
-          #remoteMaximumPacketSize: 1024,
-        },
-      ).reflectee as SSHChannelController;
+      final channelController = client.testHooks.acceptChannel(
+        localChannelId: 1,
+        remoteChannelId: 2,
+        remoteInitialWindowSize: 1024,
+        remoteMaximumPacketSize: 1024,
+      );
 
       expect(channelController.onFlush, isNotNull);
       await channelController.flush();
