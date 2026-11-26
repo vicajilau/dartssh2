@@ -1,3 +1,7 @@
+## Unreleased
+
+- Added tests that pin down how the handshake and authentication timeouts end a connection: it is closed, `done` reports the timeout, and a success that arrives later does not reopen it. The behavior is unchanged. [#261](https://github.com/vicajilau/dartssh2/pull/261)
+
 ## [4.2.0] - 2026-11-26
 
 - Added `SSHClient.disconnect()`, which sends `SSH_MSG_DISCONNECT` before closing, so the server logs a clean disconnect instead of a dropped connection. Use it when closing on purpose; `close()` is unchanged. [#250](https://github.com/vicajilau/dartssh2/pull/250)

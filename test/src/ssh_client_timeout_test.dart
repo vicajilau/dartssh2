@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/message/msg_userauth.dart';
 import 'package:dartssh2/src/ssh_client.dart';
 import 'package:test/test.dart';
 
@@ -21,7 +22,8 @@ void main() {
         throwsA(isA<SSHHandshakeError>()),
       );
 
-      client.close();
+      expect(client.isClosed, isTrue);
+      await expectLater(client.done, throwsA(isA<SSHHandshakeError>()));
     });
 
     test('fails authentication future when auth times out', () async {
@@ -39,7 +41,27 @@ void main() {
         throwsA(isA<SSHAuthAbortError>()),
       );
 
-      client.close();
+      expect(client.isClosed, isTrue);
+      await expectLater(client.done, throwsA(isA<SSHAuthAbortError>()));
+    });
+
+    test('a success that arrives after the auth timeout opens nothing',
+        () async {
+      final client = SSHClient(
+        _FakeSSHSocket(),
+        username: 'demo',
+        authTimeout: const Duration(milliseconds: 10),
+      );
+      clientTestHooks(client).handleTransportReady();
+      await expectLater(
+        client.authenticated,
+        throwsA(isA<SSHAuthAbortError>()),
+      );
+
+      client.handlePacket(SSH_Message_Userauth_Success().encode());
+
+      expect(client.isClosed, isTrue);
+      await expectLater(client.ping(), throwsA(isA<SSHAuthAbortError>()));
     });
   });
 }
