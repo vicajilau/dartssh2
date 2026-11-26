@@ -96,7 +96,10 @@ class SSHCipherType extends SSHAlgorithm {
     this.aeadTagSize = 0,
     this.ivSize = 16,
     this.blockSize = 16,
-  });
+  }) : assert(
+          isAead == (cipherFactory == null),
+          'a block cipher needs a factory, and an AEAD cipher has none',
+        );
 
   /// The name of the algorithm. For example, `"aes256-ctr`"`.
   @override

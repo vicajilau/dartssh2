@@ -1,7 +1,7 @@
-// A web-runnable AEAD test.
+// A web-runnable AEAD test, independent of the transport.
 //
-// ssh_transport_aead_test.dart exercises SSHTransport's private AES-GCM/
-// ChaCha20-Poly1305 machinery directly via dart:mirrors, which is VM-only.
+// ssh_transport_aead_test.dart drives SSHTransport's own AES-GCM and
+// ChaCha20-Poly1305 paths, on the web too except for ChaCha20-Poly1305.
 // This file instead reproduces, at the public-API level, exactly what
 // SSHTransport._nonceForSequence and _processAead do -- deriving an AEAD
 // nonce from an IV and a packet sequence number via

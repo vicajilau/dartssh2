@@ -1887,6 +1887,55 @@ class SSHClient {
   }
 }
 
+/// Internal state of [client], for this package's own tests.
+///
+/// Those tests run without a server, so they cannot complete a key exchange
+/// and need to reach the states that follow one directly. This is not part of
+/// the public API: like [SSHClientTestHooks], it is hidden from
+/// `package:dartssh2/dartssh2.dart`, so [SSHClient] itself gains no member,
+/// and it may change in any release.
+@visibleForTesting
+SSHClientTestHooks clientTestHooks(SSHClient client) =>
+    SSHClientTestHooks._(client);
+
+/// See [clientTestHooks].
+@visibleForTesting
+class SSHClientTestHooks {
+  SSHClientTestHooks._(this._client);
+
+  final SSHClient _client;
+
+  SSHTransport get transport => _client._transport;
+
+  Map<SSHChannelId, SSHChannelController> get channels => _client._channels;
+
+  Iterable<SSHChannelId> get pendingChannelOpens =>
+      _client._pendingChannelOpens.keys;
+
+  SSHChannelIdAllocator get channelIdAllocator => _client._channelIdAllocator;
+
+  void handleTransportReady() => _client._handleTransportReady();
+
+  void handleTransportClosed(SSHError? error) =>
+      _client._handleTransportClosed(error);
+
+  Future<SSHChannelController> openSessionChannel() =>
+      _client._openSessionChannel();
+
+  SSHChannelController acceptChannel({
+    required SSHChannelId localChannelId,
+    required SSHChannelId remoteChannelId,
+    required int remoteInitialWindowSize,
+    required int remoteMaximumPacketSize,
+  }) =>
+      _client._acceptChannel(
+        localChannelId: localChannelId,
+        remoteChannelId: remoteChannelId,
+        remoteInitialWindowSize: remoteInitialWindowSize,
+        remoteMaximumPacketSize: remoteMaximumPacketSize,
+      );
+}
+
 class SSHRemoteForward {
   final String host;
 

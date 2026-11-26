@@ -1,42 +1,22 @@
-// Uses dart:mirrors to reach SSHTransport's private methods; dart:mirrors is
-// VM-only. The web-runnable AEAD coverage lives in
-// ssh_transport_aead_web_test.dart instead.
-@TestOn('vm')
-library;
+// The ChaCha20-Poly1305 tests that encrypt or decrypt a packet run on the VM
+// only: PointyCastle's Poly1305 needs full-width 64-bit integers, which a
+// browser does not have (see "Web support" in the README). Everything else
+// here, AES-GCM included, also runs in the browser.
 
 import 'dart:async';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_kex.dart';
 import 'package:dartssh2/src/ssh_packet.dart';
 import 'package:dartssh2/src/utils/openssh_chacha20_poly1305.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final transportLibrary = reflectClass(SSHTransport).owner as LibraryMirror;
-  final packetLibrary = reflectClass(SSHPacketSN).owner as LibraryMirror;
-  Symbol privateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, transportLibrary);
-  Symbol packetPrivateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, packetLibrary);
-  void setPrivate(SSHTransport transport, String field, Object? value) {
-    reflect(transport).setField(privateSymbol(field), value);
-  }
-
-  T getPrivate<T>(SSHTransport transport, String field) {
-    return reflect(transport).getField(privateSymbol(field)).reflectee as T;
-  }
-
-  void setSequenceValue(SSHTransport transport, String field, int value) {
-    final sequence =
-        reflect(transport).getField(privateSymbol(field)).reflectee;
-    reflect(sequence).setField(packetPrivateSymbol('_value'), value);
-  }
-
   group('SSHTransport AEAD', () {
-    test('exchanges fragmented OpenSSH ChaCha20-Poly1305 packets', () async {
+    test('exchanges fragmented OpenSSH ChaCha20-Poly1305 packets', testOn: 'vm',
+        () async {
       final key = Uint8List.fromList(List<int>.generate(64, (i) => i));
       final payload = Uint8List.fromList(
         List<int>.generate(37, (i) => (i * 17) & 0xff),
@@ -49,23 +29,14 @@ void main() {
           cipher: [SSHCipherType.chacha20poly1305],
         ),
       );
-      setPrivate(
-        sender,
-        '_clientCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(
-        sender,
-        '_localCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(
-        sender,
-        '_localChaChaCipher',
-        OpenSSHChaCha20Poly1305(key),
-      );
-      setPrivate(sender, '_kexInProgress', false);
-      setSequenceValue(sender, '_localPacketSN', 7);
+      transportTestHooks(sender).clientCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(sender).localCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(sender).localChaChaCipher =
+          OpenSSHChaCha20Poly1305(key);
+      transportTestHooks(sender).kexInProgress = false;
+      transportTestHooks(sender).localPacketSN.value = 7;
 
       sender.sendPacket(payload);
       final encryptedPacket = senderSocket.packets.last;
@@ -84,26 +55,17 @@ void main() {
           return true;
         },
       );
-      setPrivate(receiver, '_remoteVersion', 'SSH-2.0-test');
-      setPrivate(
-        receiver,
-        '_serverCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(
-        receiver,
-        '_remoteCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(
-        receiver,
-        '_remoteChaChaCipher',
-        OpenSSHChaCha20Poly1305(key),
-      );
+      transportTestHooks(receiver).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(receiver).serverCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(receiver).remoteCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(receiver).remoteChaChaCipher =
+          OpenSSHChaCha20Poly1305(key);
       // The receiver must be past key exchange, otherwise the packet is
       // treated as an unexpected message during kex and never delivered.
-      setPrivate(receiver, '_kexInProgress', false);
-      setSequenceValue(receiver, '_remotePacketSN', 7);
+      transportTestHooks(receiver).kexInProgress = false;
+      transportTestHooks(receiver).remotePacketSN.value = 7;
 
       receiverSocket.addIncomingBytes(
         Uint8List.sublistView(encryptedPacket, 0, 4),
@@ -123,7 +85,8 @@ void main() {
       receiver.close();
     });
 
-    test('keeps active ChaCha keys until NEWKEYS takes effect', () {
+    test('keeps active ChaCha keys until NEWKEYS takes effect', testOn: 'vm',
+        () {
       final key = Uint8List.fromList(List<int>.generate(64, (i) => i));
       final cipher = OpenSSHChaCha20Poly1305(key);
       final socket = _CaptureSSHSocket();
@@ -131,19 +94,12 @@ void main() {
 
       // A rekey has selected AES-GCM, but outbound packets up to and including
       // NEWKEYS must still use the currently active ChaCha keys.
-      setPrivate(
-        transport,
-        '_clientCipherType',
-        SSHCipherType.aes128gcm,
-      );
-      setPrivate(
-        transport,
-        '_localCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(transport, '_localChaChaCipher', cipher);
-      setPrivate(transport, '_kexInProgress', true);
-      setSequenceValue(transport, '_localPacketSN', 9);
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128gcm;
+      transportTestHooks(transport).localCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).localChaChaCipher = cipher;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).localPacketSN.value = 9;
 
       final payload = Uint8List.fromList([SSH_Message_NewKeys.messageId]);
       transport.sendPacket(payload);
@@ -161,30 +117,23 @@ void main() {
       // different negotiated cipher waits for the peer's NEWKEYS packet.
       final receiverSocket = _CaptureSSHSocket();
       final receiver = SSHTransport(receiverSocket);
-      setPrivate(
-        receiver,
-        '_serverCipherType',
-        SSHCipherType.aes128gcm,
-      );
-      setPrivate(
-        receiver,
-        '_remoteCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(receiver, '_remoteChaChaCipher', cipher);
-      setSequenceValue(receiver, '_remotePacketSN', 9);
-      final dynamic buffer = getPrivate<dynamic>(receiver, '_buffer');
+      transportTestHooks(receiver).serverCipherType = SSHCipherType.aes128gcm;
+      transportTestHooks(receiver).remoteCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(receiver).remoteChaChaCipher = cipher;
+      transportTestHooks(receiver).remotePacketSN.value = 9;
+      final dynamic buffer = transportTestHooks(receiver).buffer;
       buffer.add(encrypted);
 
-      final received = reflect(receiver)
-          .invoke(privateSymbol('_consumeChaChaPacket'), const []).reflectee;
+      final received = transportTestHooks(receiver).consumeChaChaPacket();
       expect(received, payload);
 
       transport.close();
       receiver.close();
     });
 
-    test('rejects misaligned OpenSSH ChaCha20-Poly1305 packets', () {
+    test('rejects misaligned OpenSSH ChaCha20-Poly1305 packets', testOn: 'vm',
+        () {
       final key = Uint8List(64);
       final cipher = OpenSSHChaCha20Poly1305(key);
       final packet = Uint8List(4 + 15);
@@ -193,25 +142,16 @@ void main() {
 
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
-      setPrivate(
-        transport,
-        '_serverCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(
-        transport,
-        '_remoteCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
-      setPrivate(transport, '_remoteChaChaCipher', cipher);
-      final dynamic buffer = getPrivate<dynamic>(transport, '_buffer');
+      transportTestHooks(transport).serverCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).remoteCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).remoteChaChaCipher = cipher;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(cipher.encryptPacket(packet, 0));
 
       expect(
-        () => reflect(transport).invoke(
-          privateSymbol('_consumeChaChaPacket'),
-          const [],
-        ),
+        () => transportTestHooks(transport).consumeChaChaPacket(),
         throwsA(
           isA<SSHPacketError>().having(
             (error) => error.toString(),
@@ -228,63 +168,48 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(21));
-      setPrivate(
-        transport,
-        '_exchangeHash',
-        Uint8List.fromList(List<int>.filled(32, 22)),
-      );
-      setPrivate(
-        transport,
-        '_sessionId',
-        Uint8List.fromList(List<int>.filled(32, 23)),
-      );
-      setPrivate(
-        transport,
-        '_clientCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(21);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 22));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 23));
+      transportTestHooks(transport).clientCipherType =
+          SSHCipherType.chacha20poly1305;
 
-      reflect(transport).invoke(privateSymbol('_applyLocalKeys'), const []);
-      final first = getPrivate<OpenSSHChaCha20Poly1305?>(
-        transport,
-        '_localChaChaCipher',
-      );
+      transportTestHooks(transport).applyLocalKeys();
+      final first = transportTestHooks(transport).localChaChaCipher;
       expect(first, isNotNull);
       expect(
-        getPrivate<SSHCipherType?>(transport, '_localCipherType'),
+        transportTestHooks(transport).localCipherType,
         SSHCipherType.chacha20poly1305,
       );
-      expect(getPrivate<Object?>(transport, '_localMacType'), isNull);
-      expect(getPrivate<Object?>(transport, '_localCipherKey'), isNull);
-      expect(getPrivate<Object?>(transport, '_localIV'), isNull);
+      expect(transportTestHooks(transport).localMacType, isNull);
+      expect(transportTestHooks(transport).localCipherKey, isNull);
+      expect(transportTestHooks(transport).localIV, isNull);
 
-      setPrivate(transport, '_sharedSecret', BigInt.from(24));
-      reflect(transport).invoke(privateSymbol('_applyLocalKeys'), const []);
-      final second = getPrivate<OpenSSHChaCha20Poly1305?>(
-        transport,
-        '_localChaChaCipher',
-      );
+      transportTestHooks(transport).sharedSecret = BigInt.from(24);
+      transportTestHooks(transport).applyLocalKeys();
+      final second = transportTestHooks(transport).localChaChaCipher;
       expect(second, isNotNull);
       expect(identical(second, first), isFalse);
 
-      setPrivate(transport, '_clientCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_clientMacType', SSHMacType.hmacSha256);
-      reflect(transport).invoke(privateSymbol('_applyLocalKeys'), const []);
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).clientMacType = SSHMacType.hmacSha256;
+      transportTestHooks(transport).applyLocalKeys();
       expect(
-        getPrivate<Object?>(transport, '_localChaChaCipher'),
+        transportTestHooks(transport).localChaChaCipher,
         isNull,
       );
       expect(
-        getPrivate<SSHCipherType?>(transport, '_localCipherType'),
+        transportTestHooks(transport).localCipherType,
         SSHCipherType.aes128ctr,
       );
       expect(
-        getPrivate<SSHMacType?>(transport, '_localMacType'),
+        transportTestHooks(transport).localMacType,
         SSHMacType.hmacSha256,
       );
-      expect(getPrivate<Object?>(transport, '_encryptCipher'), isNotNull);
+      expect(transportTestHooks(transport).encryptCipher, isNotNull);
 
       transport.close();
     });
@@ -293,63 +218,48 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(31));
-      setPrivate(
-        transport,
-        '_exchangeHash',
-        Uint8List.fromList(List<int>.filled(32, 32)),
-      );
-      setPrivate(
-        transport,
-        '_sessionId',
-        Uint8List.fromList(List<int>.filled(32, 33)),
-      );
-      setPrivate(
-        transport,
-        '_serverCipherType',
-        SSHCipherType.chacha20poly1305,
-      );
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(31);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 32));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 33));
+      transportTestHooks(transport).serverCipherType =
+          SSHCipherType.chacha20poly1305;
 
-      reflect(transport).invoke(privateSymbol('_applyRemoteKeys'), const []);
-      final first = getPrivate<OpenSSHChaCha20Poly1305?>(
-        transport,
-        '_remoteChaChaCipher',
-      );
+      transportTestHooks(transport).applyRemoteKeys();
+      final first = transportTestHooks(transport).remoteChaChaCipher;
       expect(first, isNotNull);
 
-      setPrivate(transport, '_sharedSecret', BigInt.from(34));
-      reflect(transport).invoke(privateSymbol('_applyRemoteKeys'), const []);
-      final second = getPrivate<OpenSSHChaCha20Poly1305?>(
-        transport,
-        '_remoteChaChaCipher',
-      );
+      transportTestHooks(transport).sharedSecret = BigInt.from(34);
+      transportTestHooks(transport).applyRemoteKeys();
+      final second = transportTestHooks(transport).remoteChaChaCipher;
       expect(second, isNotNull);
       expect(identical(second, first), isFalse);
       expect(
-        getPrivate<SSHCipherType?>(transport, '_remoteCipherType'),
+        transportTestHooks(transport).remoteCipherType,
         SSHCipherType.chacha20poly1305,
       );
-      expect(getPrivate<Object?>(transport, '_remoteMacType'), isNull);
-      expect(getPrivate<Object?>(transport, '_remoteCipherKey'), isNull);
-      expect(getPrivate<Object?>(transport, '_remoteIV'), isNull);
+      expect(transportTestHooks(transport).remoteMacType, isNull);
+      expect(transportTestHooks(transport).remoteCipherKey, isNull);
+      expect(transportTestHooks(transport).remoteIV, isNull);
 
-      setPrivate(transport, '_serverCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_serverMacType', SSHMacType.hmacSha256);
-      reflect(transport).invoke(privateSymbol('_applyRemoteKeys'), const []);
+      transportTestHooks(transport).serverCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).serverMacType = SSHMacType.hmacSha256;
+      transportTestHooks(transport).applyRemoteKeys();
       expect(
-        getPrivate<Object?>(transport, '_remoteChaChaCipher'),
+        transportTestHooks(transport).remoteChaChaCipher,
         isNull,
       );
       expect(
-        getPrivate<SSHCipherType?>(transport, '_remoteCipherType'),
+        transportTestHooks(transport).remoteCipherType,
         SSHCipherType.aes128ctr,
       );
       expect(
-        getPrivate<SSHMacType?>(transport, '_remoteMacType'),
+        transportTestHooks(transport).remoteMacType,
         SSHMacType.hmacSha256,
       );
-      expect(getPrivate<Object?>(transport, '_decryptCipher'), isNotNull);
+      expect(transportTestHooks(transport).decryptCipher, isNotNull);
 
       transport.close();
     });
@@ -377,12 +287,12 @@ void main() {
             ),
           );
 
-          setPrivate(sender, '_clientCipherType', cipherType);
-          setPrivate(sender, '_localCipherType', cipherType);
-          setPrivate(sender, '_localCipherKey', key);
-          setPrivate(sender, '_localIV', iv);
-          setPrivate(sender, '_kexInProgress', false);
-          setSequenceValue(sender, '_localPacketSN', 0);
+          transportTestHooks(sender).clientCipherType = cipherType;
+          transportTestHooks(sender).localCipherType = cipherType;
+          transportTestHooks(sender).localCipherKey = key;
+          transportTestHooks(sender).localIV = iv;
+          transportTestHooks(sender).kexInProgress = false;
+          transportTestHooks(sender).localPacketSN.value = 0;
 
           final payload = Uint8List.fromList(
             List.generate(payloadLength, (index) => index % 256),
@@ -406,13 +316,13 @@ void main() {
             },
           );
 
-          setPrivate(receiver, '_remoteVersion', 'SSH-2.0-test');
-          setPrivate(receiver, '_serverCipherType', cipherType);
-          setPrivate(receiver, '_remoteCipherType', cipherType);
-          setPrivate(receiver, '_remoteCipherKey', key);
-          setPrivate(receiver, '_remoteIV', iv);
-          setPrivate(receiver, '_kexInProgress', false);
-          setSequenceValue(receiver, '_remotePacketSN', 0);
+          transportTestHooks(receiver).remoteVersion = 'SSH-2.0-test';
+          transportTestHooks(receiver).serverCipherType = cipherType;
+          transportTestHooks(receiver).remoteCipherType = cipherType;
+          transportTestHooks(receiver).remoteCipherKey = key;
+          transportTestHooks(receiver).remoteIV = iv;
+          transportTestHooks(receiver).kexInProgress = false;
+          transportTestHooks(receiver).remotePacketSN.value = 0;
 
           receiverSocket.addIncomingBytes(encryptedPacket);
 
@@ -449,12 +359,12 @@ void main() {
           ),
         );
 
-        setPrivate(sender, '_clientCipherType', cipherType);
-        setPrivate(sender, '_localCipherType', cipherType);
-        setPrivate(sender, '_localCipherKey', key);
-        setPrivate(sender, '_localIV', iv);
-        setPrivate(sender, '_kexInProgress', false);
-        setSequenceValue(sender, '_localPacketSN', 0);
+        transportTestHooks(sender).clientCipherType = cipherType;
+        transportTestHooks(sender).localCipherType = cipherType;
+        transportTestHooks(sender).localCipherKey = key;
+        transportTestHooks(sender).localIV = iv;
+        transportTestHooks(sender).kexInProgress = false;
+        transportTestHooks(sender).localPacketSN.value = 0;
 
         sender.sendPacket(Uint8List.fromList([251, 9, 8, 7]));
         final tampered = Uint8List.fromList(senderSocket.packets.last);
@@ -468,12 +378,12 @@ void main() {
           ),
         );
 
-        setPrivate(receiver, '_remoteVersion', 'SSH-2.0-test');
-        setPrivate(receiver, '_serverCipherType', cipherType);
-        setPrivate(receiver, '_remoteCipherType', cipherType);
-        setPrivate(receiver, '_remoteCipherKey', key);
-        setPrivate(receiver, '_remoteIV', iv);
-        setSequenceValue(receiver, '_remotePacketSN', 0);
+        transportTestHooks(receiver).remoteVersion = 'SSH-2.0-test';
+        transportTestHooks(receiver).serverCipherType = cipherType;
+        transportTestHooks(receiver).remoteCipherType = cipherType;
+        transportTestHooks(receiver).remoteCipherKey = key;
+        transportTestHooks(receiver).remoteIV = iv;
+        transportTestHooks(receiver).remotePacketSN.value = 0;
 
         receiverSocket.addIncomingBytes(tampered);
 
@@ -498,10 +408,7 @@ void main() {
       final transport = SSHTransport(socket);
 
       expect(
-        () => reflect(transport).invoke(
-          privateSymbol('_nonceForSequence'),
-          [Uint8List(8), 0],
-        ),
+        () => transportTestHooks(transport).nonceForSequence(Uint8List(8), 0),
         throwsA(isA<ArgumentError>()),
       );
 
@@ -516,22 +423,22 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_remoteVersion', 'SSH-2.0-test');
-        setPrivate(transport, '_serverCipherType', cipherType);
-        setPrivate(
-            transport, '_remoteCipherKey', Uint8List(cipherType.keySize));
-        setPrivate(transport, '_remoteIV', Uint8List(cipherType.ivSize));
-        setSequenceValue(transport, '_remotePacketSN', 0);
+        transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+        transportTestHooks(transport).serverCipherType = cipherType;
+        transportTestHooks(transport).remoteCipherKey =
+            Uint8List(cipherType.keySize);
+        transportTestHooks(transport).remoteIV = Uint8List(cipherType.ivSize);
+        transportTestHooks(transport).remotePacketSN.value = 0;
 
-        final resultNoHeader = reflect(transport).invoke(
-            privateSymbol('_consumeAeadPacket'), [cipherType]).reflectee;
+        final resultNoHeader =
+            transportTestHooks(transport).consumeAeadPacket(cipherType);
         expect(resultNoHeader, isNull);
 
-        final dynamic buffer = getPrivate<dynamic>(transport, '_buffer');
+        final dynamic buffer = transportTestHooks(transport).buffer;
         buffer.add(Uint8List.fromList([0, 0, 0, 20, 1, 2, 3]));
 
-        final resultPartial = reflect(transport).invoke(
-            privateSymbol('_consumeAeadPacket'), [cipherType]).reflectee;
+        final resultPartial =
+            transportTestHooks(transport).consumeAeadPacket(cipherType);
         expect(resultPartial, isNull);
 
         transport.close();
@@ -546,24 +453,24 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_kexType', SSHKexType.x25519);
-        setPrivate(transport, '_sharedSecret', BigInt.from(1));
-        setPrivate(transport, '_exchangeHash',
-            Uint8List.fromList(List<int>.filled(32, 1)));
-        setPrivate(transport, '_sessionId',
-            Uint8List.fromList(List<int>.filled(32, 2)));
-        setPrivate(transport, '_clientCipherType', cipherType);
+        transportTestHooks(transport).kexType = SSHKexType.x25519;
+        transportTestHooks(transport).sharedSecret = BigInt.from(1);
+        transportTestHooks(transport).exchangeHash =
+            Uint8List.fromList(List<int>.filled(32, 1));
+        transportTestHooks(transport).sessionId =
+            Uint8List.fromList(List<int>.filled(32, 2));
+        transportTestHooks(transport).clientCipherType = cipherType;
 
-        reflect(transport).invoke(privateSymbol('_applyLocalKeys'), const []);
+        transportTestHooks(transport).applyLocalKeys();
 
-        final localKey = getPrivate<Uint8List?>(transport, '_localCipherKey');
-        final localIv = getPrivate<Uint8List?>(transport, '_localIV');
+        final localKey = transportTestHooks(transport).localCipherKey;
+        final localIv = transportTestHooks(transport).localIV;
         expect(localKey, isNotNull);
         expect(localKey!.length, cipherType.keySize);
         expect(localIv, isNotNull);
         expect(localIv!.length, cipherType.ivSize);
-        expect(getPrivate<Object?>(transport, '_encryptCipher'), isNull);
-        expect(getPrivate<Object?>(transport, '_localMac'), isNull);
+        expect(transportTestHooks(transport).encryptCipher, isNull);
+        expect(transportTestHooks(transport).localMac, isNull);
 
         transport.close();
       }
@@ -577,24 +484,24 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        setPrivate(transport, '_kexType', SSHKexType.x25519);
-        setPrivate(transport, '_sharedSecret', BigInt.from(1));
-        setPrivate(transport, '_exchangeHash',
-            Uint8List.fromList(List<int>.filled(32, 3)));
-        setPrivate(transport, '_sessionId',
-            Uint8List.fromList(List<int>.filled(32, 4)));
-        setPrivate(transport, '_serverCipherType', cipherType);
+        transportTestHooks(transport).kexType = SSHKexType.x25519;
+        transportTestHooks(transport).sharedSecret = BigInt.from(1);
+        transportTestHooks(transport).exchangeHash =
+            Uint8List.fromList(List<int>.filled(32, 3));
+        transportTestHooks(transport).sessionId =
+            Uint8List.fromList(List<int>.filled(32, 4));
+        transportTestHooks(transport).serverCipherType = cipherType;
 
-        reflect(transport).invoke(privateSymbol('_applyRemoteKeys'), const []);
+        transportTestHooks(transport).applyRemoteKeys();
 
-        final remoteKey = getPrivate<Uint8List?>(transport, '_remoteCipherKey');
-        final remoteIv = getPrivate<Uint8List?>(transport, '_remoteIV');
+        final remoteKey = transportTestHooks(transport).remoteCipherKey;
+        final remoteIv = transportTestHooks(transport).remoteIV;
         expect(remoteKey, isNotNull);
         expect(remoteKey!.length, cipherType.keySize);
         expect(remoteIv, isNotNull);
         expect(remoteIv!.length, cipherType.ivSize);
-        expect(getPrivate<Object?>(transport, '_decryptCipher'), isNull);
-        expect(getPrivate<Object?>(transport, '_remoteMac'), isNull);
+        expect(transportTestHooks(transport).decryptCipher, isNull);
+        expect(transportTestHooks(transport).remoteMac, isNull);
 
         transport.close();
       }
@@ -604,19 +511,19 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(5));
-      setPrivate(transport, '_exchangeHash',
-          Uint8List.fromList(List<int>.filled(32, 6)));
-      setPrivate(
-          transport, '_sessionId', Uint8List.fromList(List<int>.filled(32, 7)));
-      setPrivate(transport, '_clientCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_clientMacType', SSHMacType.hmacSha256);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(5);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 6));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 7));
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).clientMacType = SSHMacType.hmacSha256;
 
-      reflect(transport).invoke(privateSymbol('_applyLocalKeys'), const []);
+      transportTestHooks(transport).applyLocalKeys();
 
-      expect(getPrivate<Object?>(transport, '_encryptCipher'), isNotNull);
-      expect(getPrivate<Object?>(transport, '_localMac'), isNotNull);
+      expect(transportTestHooks(transport).encryptCipher, isNotNull);
+      expect(transportTestHooks(transport).localMac, isNotNull);
 
       transport.close();
     });
@@ -625,19 +532,19 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(8));
-      setPrivate(transport, '_exchangeHash',
-          Uint8List.fromList(List<int>.filled(32, 9)));
-      setPrivate(transport, '_sessionId',
-          Uint8List.fromList(List<int>.filled(32, 10)));
-      setPrivate(transport, '_serverCipherType', SSHCipherType.aes128ctr);
-      setPrivate(transport, '_serverMacType', SSHMacType.hmacSha256);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(8);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 9));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 10));
+      transportTestHooks(transport).serverCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).serverMacType = SSHMacType.hmacSha256;
 
-      reflect(transport).invoke(privateSymbol('_applyRemoteKeys'), const []);
+      transportTestHooks(transport).applyRemoteKeys();
 
-      expect(getPrivate<Object?>(transport, '_decryptCipher'), isNotNull);
-      expect(getPrivate<Object?>(transport, '_remoteMac'), isNotNull);
+      expect(transportTestHooks(transport).decryptCipher, isNotNull);
+      expect(transportTestHooks(transport).remoteMac, isNotNull);
 
       transport.close();
     });
@@ -657,8 +564,8 @@ void main() {
           ),
         );
 
-        setPrivate(transport, '_kexInProgress', true);
-        setPrivate(transport, '_sentKexInit', true);
+        transportTestHooks(transport).kexInProgress = true;
+        transportTestHooks(transport).sentKexInit = true;
 
         final payload = SSH_Message_KexInit(
           kexAlgorithms: [SSHKexType.x25519.name],
@@ -672,8 +579,8 @@ void main() {
           firstKexPacketFollows: false,
         ).encode();
 
-        final result = reflect(transport).invoke(
-            privateSymbol('_handleMessageKexInit'), [payload]).reflectee;
+        final result =
+            transportTestHooks(transport).handleMessageKexInit(payload);
         await expectLater(result, completes);
 
         transport.close();
@@ -684,13 +591,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexInProgress', true);
+      transportTestHooks(transport).kexInProgress = true;
 
       // 94 is outside control/kex message ranges and should be buffered.
       transport.sendPacket(Uint8List.fromList([94, 1, 2]));
 
-      final pending =
-          getPrivate<List<Uint8List>>(transport, '_rekeyPendingPackets');
+      final pending = transportTestHooks(transport).rekeyPendingPackets;
       expect(pending, hasLength(1));
       expect(pending.first, Uint8List.fromList([94, 1, 2]));
 
@@ -702,8 +608,7 @@ void main() {
       final transport = SSHTransport(socket);
 
       expect(
-        () => reflect(transport)
-            .invoke(privateSymbol('_applyLocalKeys'), const []),
+        () => transportTestHooks(transport).applyLocalKeys(),
         throwsA(isA<StateError>()),
       );
 
@@ -715,8 +620,7 @@ void main() {
       final transport = SSHTransport(socket);
 
       expect(
-        () => reflect(transport)
-            .invoke(privateSymbol('_applyRemoteKeys'), const []),
+        () => transportTestHooks(transport).applyRemoteKeys(),
         throwsA(isA<StateError>()),
       );
 
@@ -727,17 +631,16 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(11));
-      setPrivate(transport, '_exchangeHash',
-          Uint8List.fromList(List<int>.filled(32, 12)));
-      setPrivate(transport, '_sessionId',
-          Uint8List.fromList(List<int>.filled(32, 13)));
-      setPrivate(transport, '_clientCipherType', SSHCipherType.aes128ctr);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(11);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 12));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 13));
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128ctr;
 
       expect(
-        () => reflect(transport)
-            .invoke(privateSymbol('_applyLocalKeys'), const []),
+        () => transportTestHooks(transport).applyLocalKeys(),
         throwsA(isA<StateError>()),
       );
 
@@ -748,17 +651,16 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      setPrivate(transport, '_kexType', SSHKexType.x25519);
-      setPrivate(transport, '_sharedSecret', BigInt.from(14));
-      setPrivate(transport, '_exchangeHash',
-          Uint8List.fromList(List<int>.filled(32, 15)));
-      setPrivate(transport, '_sessionId',
-          Uint8List.fromList(List<int>.filled(32, 16)));
-      setPrivate(transport, '_serverCipherType', SSHCipherType.aes128ctr);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(14);
+      transportTestHooks(transport).exchangeHash =
+          Uint8List.fromList(List<int>.filled(32, 15));
+      transportTestHooks(transport).sessionId =
+          Uint8List.fromList(List<int>.filled(32, 16));
+      transportTestHooks(transport).serverCipherType = SSHCipherType.aes128ctr;
 
       expect(
-        () => reflect(transport)
-            .invoke(privateSymbol('_applyRemoteKeys'), const []),
+        () => transportTestHooks(transport).applyRemoteKeys(),
         throwsA(isA<StateError>()),
       );
 
@@ -776,8 +678,8 @@ void main() {
         ),
       );
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
 
       final payload = SSH_Message_KexInit(
         kexAlgorithms: [SSHKexType.x25519.name],
@@ -792,13 +694,7 @@ void main() {
       ).encode();
 
       await expectLater(
-        () async {
-          final result = reflect(transport).invoke(
-              privateSymbol('_handleMessageKexInit'), [payload]).reflectee;
-          if (result is Future) {
-            await result;
-          }
-        },
+        transportTestHooks(transport).handleMessageKexInit(payload),
         throwsA(isA<StateError>()),
       );
 
@@ -816,8 +712,8 @@ void main() {
         ),
       );
 
-      setPrivate(transport, '_kexInProgress', true);
-      setPrivate(transport, '_sentKexInit', true);
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
 
       final payload = SSH_Message_KexInit(
         kexAlgorithms: [SSHKexType.x25519.name],
@@ -832,13 +728,7 @@ void main() {
       ).encode();
 
       await expectLater(
-        () async {
-          final result = reflect(transport).invoke(
-              privateSymbol('_handleMessageKexInit'), [payload]).reflectee;
-          if (result is Future) {
-            await result;
-          }
-        },
+        transportTestHooks(transport).handleMessageKexInit(payload),
         throwsA(isA<StateError>()),
       );
 

@@ -1,39 +1,25 @@
-// Uses dart:mirrors, which is VM-only.
-@TestOn('vm')
-library;
-
 import 'dart:async';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
-import 'package:dartssh2/src/ssh_channel.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
+import 'package:dartssh2/src/message/msg_userauth.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final clientLibrary = reflectClass(SSHClient).owner as LibraryMirror;
-  Symbol privateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, clientLibrary);
-  final transportLibrary = reflectClass(SSHTransport).owner as LibraryMirror;
-  Symbol transportPrivateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, transportLibrary);
-
   test('transport termination fails every pending SSH reply waiter', () async {
     final socket = _FakeSSHSocket();
     final client = SSHClient(socket, username: 'demo', keepAliveInterval: null);
-    final clientMirror = reflect(client);
-    final authenticated = clientMirror
-        .getField(privateSymbol('_authenticated'))
-        .reflectee as Completer<void>;
-    authenticated.complete();
+    client.handlePacket(SSH_Message_Userauth_Success().encode());
+    await client.authenticated;
 
-    final channelController =
-        clientMirror.invoke(privateSymbol('_acceptChannel'), const [], {
-      #localChannelId: 99,
-      #remoteChannelId: 100,
-      #remoteInitialWindowSize: 0,
-      #remoteMaximumPacketSize: 1024,
-    }).reflectee as SSHChannelController;
+    final channelController = clientTestHooks(client).acceptChannel(
+      localChannelId: 99,
+      remoteChannelId: 100,
+      remoteInitialWindowSize: 0,
+      remoteMaximumPacketSize: 1024,
+    );
 
     final ping = client.ping();
     final open = client.forwardLocal('example.com', 22);
@@ -50,9 +36,8 @@ void main() {
 
     await Future.wait(expectations);
     expect(
-      () => clientMirror.invoke(privateSymbol('_handleTransportClosed'), [
-        SSHStateError('later'),
-      ]),
+      () =>
+          clientTestHooks(client).handleTransportClosed(SSHStateError('later')),
       returnsNormally,
     );
 
@@ -78,17 +63,9 @@ void main() {
       username: 'demo',
       keepAliveInterval: null,
     );
-    final authenticated = reflect(client)
-        .getField(privateSymbol('_authenticated'))
-        .reflectee as Completer<void>;
-    authenticated.complete();
-    final transport = reflect(client)
-        .getField(privateSymbol('_transport'))
-        .reflectee as SSHTransport;
-    reflect(transport).setField(
-      transportPrivateSymbol('_kexInProgress'),
-      false,
-    );
+    client.handlePacket(SSH_Message_Userauth_Success().encode());
+    await client.authenticated;
+    transportTestHooks(clientTestHooks(client).transport).kexInProgress = false;
 
     final error = StateError('write failed');
     socket.writeError = error;

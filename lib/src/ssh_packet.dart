@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:dartssh2/src/utils/list.dart';
+import 'package:meta/meta.dart';
 
 /// Contains rfc4253 packet format related constants and helper functions.
 abstract class SSHPacket {
@@ -64,6 +65,10 @@ class SSHPacketSN {
   var _value = 0;
 
   int get value => _value;
+
+  /// Lets tests start near the 2³² wrap without sending that many packets.
+  @visibleForTesting
+  set value(int value) => _value = value;
 
   void increase() {
     if (_value == 0xffffffff) {

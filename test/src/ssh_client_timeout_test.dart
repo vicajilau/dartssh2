@@ -1,20 +1,12 @@
-// Uses dart:mirrors, which is VM-only.
-@TestOn('vm')
-library;
-
 import 'dart:async';
 import 'dart:convert';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final clientLibrary = reflectClass(SSHClient).owner as LibraryMirror;
-  Symbol privateSymbol(String name) =>
-      MirrorSystem.getSymbol(name, clientLibrary);
-
   group('SSHClient timeouts', () {
     test('fails authentication future when handshake times out', () async {
       final socket = _FakeSSHSocket();
@@ -40,7 +32,7 @@ void main() {
         authTimeout: const Duration(milliseconds: 10),
       );
 
-      reflect(client).invoke(privateSymbol('_handleTransportReady'), const []);
+      clientTestHooks(client).handleTransportReady();
 
       await expectLater(
         client.authenticated,

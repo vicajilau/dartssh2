@@ -1,15 +1,11 @@
-// Uses dart:mirrors to read the channel's private reply queue, which is
-// VM-only.
-@TestOn('vm')
-library;
-
 import 'dart:async';
-import 'dart:mirrors';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_channel.dart';
-import 'package:dartssh2/src/ssh_channel.dart';
+import 'package:dartssh2/src/message/msg_userauth.dart';
 import 'package:dartssh2/src/ssh_message.dart';
 import 'package:dartssh2/src/ssh_packet.dart';
 import 'package:dartssh2/src/utils/async_queue.dart';
@@ -342,30 +338,15 @@ SSH_Message_Channel_Close _close() =>
     SSH_Message_Channel_Close(recipientChannel: 0);
 
 /// The channel's queue of replies it has asked for and not yet received.
-AsyncQueue<bool> _replyQueue(SSHClient client) {
-  final channels =
-      reflect(client).getField(_clientSymbol('_channels')).reflectee as Map;
-  final controller = channels[0] as SSHChannelController;
-  final library = reflectClass(SSHChannelController).owner as LibraryMirror;
-  final symbol = MirrorSystem.getSymbol('_requestReplyQueue', library);
-  return reflect(controller).getField(symbol).reflectee as AsyncQueue<bool>;
-}
+AsyncQueue<bool> _replyQueue(SSHClient client) =>
+    clientTestHooks(client).channels[0]!.requestReplyQueue;
 
 void _authenticate(SSHClient client) {
-  final completer = reflect(client).getField(_clientSymbol('_authenticated'));
-  completer.invoke(#complete, [null]);
-}
-
-Symbol _clientSymbol(String name) {
-  final library = reflectClass(SSHClient).owner as LibraryMirror;
-  return MirrorSystem.getSymbol(name, library);
+  client.handlePacket(SSH_Message_Userauth_Success().encode());
 }
 
 void _disableRekeyBuffer(SSHClient client) {
-  final transport = reflect(client).getField(_clientSymbol('_transport'));
-  final library = transport.type.owner as LibraryMirror;
-  final symbol = MirrorSystem.getSymbol('_kexInProgress', library);
-  transport.setField(symbol, false);
+  transportTestHooks(clientTestHooks(client).transport).kexInProgress = false;
 }
 
 class _FakeSSHSocket implements SSHSocket {

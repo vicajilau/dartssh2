@@ -18,6 +18,7 @@ import 'package:dartssh2/src/ssh_kex.dart';
 import 'package:dartssh2/src/utils/bigint.dart';
 import 'package:dartssh2/src/utils/cipher_ext.dart';
 import 'package:dartssh2/src/utils/chunk_buffer.dart';
+import 'package:dartssh2/src/utils/hostkey_fingerprint.dart';
 import 'package:dartssh2/src/ssh_kex_utils.dart';
 import 'package:dartssh2/src/ssh_packet.dart';
 import 'package:dartssh2/src/utils/int.dart';
@@ -29,6 +30,7 @@ import 'package:dartssh2/src/message/msg_kex.dart';
 import 'package:dartssh2/src/message/msg_kex_dh.dart';
 import 'package:dartssh2/src/message/msg_kex_ecdh.dart';
 import 'package:dartssh2/src/ssh_message.dart';
+import 'package:meta/meta.dart';
 import 'package:pointycastle/export.dart';
 
 import '../dartssh2.dart';
@@ -43,12 +45,6 @@ typedef SSHHostkeyVerifyHandler = FutureOr<bool> Function(
   String type,
   Uint8List fingerprint,
 );
-
-Uint8List _hostkeyFingerprint(Uint8List hostkey) {
-  final fingerprint = SHA256Digest().process(hostkey);
-  final encoded = base64.encode(fingerprint).replaceAll('=', '');
-  return Uint8List.fromList(utf8.encode('SHA256:$encoded'));
-}
 
 typedef SSHTransportReadyHandler = void Function();
 
@@ -1886,7 +1882,7 @@ class SSHTransport {
     _sessionId ??= exchangeHash;
     _sharedSecret = sharedSecret;
 
-    final fingerprint = _hostkeyFingerprint(hostkey);
+    final fingerprint = hostkeyFingerprint(hostkey);
 
     if (_hostkeyVerified) {
       // The signature above is re-checked on every rekey, but that only
@@ -2072,4 +2068,160 @@ class SSHTransport {
     final messageId = data[0];
     return (messageId >= 20 && messageId <= 49) || messageId <= 4;
   }
+}
+
+/// Internal state of [transport], for this package's own tests.
+///
+/// The transport implements only the client side of the key exchange, so its
+/// tests cannot run a real handshake in memory. They set up the state one
+/// would leave behind (negotiated algorithms, keys, sequence numbers) and
+/// drive the steps that follow it. This is not part of the public API: like
+/// [SSHTransportTestHooks], it is hidden from `package:dartssh2/dartssh2.dart`,
+/// so [SSHTransport] itself gains no member, and it may change in any release.
+@visibleForTesting
+SSHTransportTestHooks transportTestHooks(SSHTransport transport) =>
+    SSHTransportTestHooks._(transport);
+
+/// See [transportTestHooks].
+@visibleForTesting
+class SSHTransportTestHooks {
+  SSHTransportTestHooks._(this._transport);
+
+  final SSHTransport _transport;
+
+  set remoteVersion(String? value) => _transport._remoteVersion = value;
+
+  set localKexInit(Uint8List value) => _transport._localKexInit = value;
+
+  set remoteKexInit(Uint8List value) => _transport._remoteKexInit = value;
+
+  set kexType(SSHKexType? value) => _transport._kexType = value;
+
+  set hostkeyType(SSHHostkeyType? value) => _transport._hostkeyType = value;
+
+  set clientCipherType(SSHCipherType? value) =>
+      _transport._clientCipherType = value;
+
+  set serverCipherType(SSHCipherType? value) =>
+      _transport._serverCipherType = value;
+
+  SSHCipherType? get localCipherType => _transport._localCipherType;
+  set localCipherType(SSHCipherType? value) =>
+      _transport._localCipherType = value;
+
+  SSHCipherType? get remoteCipherType => _transport._remoteCipherType;
+  set remoteCipherType(SSHCipherType? value) =>
+      _transport._remoteCipherType = value;
+
+  set clientMacType(SSHMacType? value) => _transport._clientMacType = value;
+
+  set serverMacType(SSHMacType? value) => _transport._serverMacType = value;
+
+  SSHMacType? get localMacType => _transport._localMacType;
+  set localMacType(SSHMacType? value) => _transport._localMacType = value;
+
+  SSHMacType? get remoteMacType => _transport._remoteMacType;
+  set remoteMacType(SSHMacType? value) => _transport._remoteMacType = value;
+
+  set kex(SSHKex? value) => _transport._kex = value;
+
+  set sessionId(Uint8List? value) => _transport._sessionId = value;
+
+  set exchangeHash(Uint8List? value) => _transport._exchangeHash = value;
+
+  bool get hostkeyVerified => _transport._hostkeyVerified;
+
+  Uint8List? get verifiedHostkeyFingerprint =>
+      _transport._verifiedHostkeyFingerprint;
+
+  set sharedSecret(BigInt? value) => _transport._sharedSecret = value;
+
+  BlockCipher? get encryptCipher => _transport._encryptCipher;
+  set encryptCipher(BlockCipher? value) => _transport._encryptCipher = value;
+
+  BlockCipher? get decryptCipher => _transport._decryptCipher;
+  set decryptCipher(BlockCipher? value) => _transport._decryptCipher = value;
+
+  OpenSSHChaCha20Poly1305? get localChaChaCipher =>
+      _transport._localChaChaCipher;
+  set localChaChaCipher(OpenSSHChaCha20Poly1305? value) =>
+      _transport._localChaChaCipher = value;
+
+  OpenSSHChaCha20Poly1305? get remoteChaChaCipher =>
+      _transport._remoteChaChaCipher;
+  set remoteChaChaCipher(OpenSSHChaCha20Poly1305? value) =>
+      _transport._remoteChaChaCipher = value;
+
+  Uint8List? get localCipherKey => _transport._localCipherKey;
+  set localCipherKey(Uint8List? value) => _transport._localCipherKey = value;
+
+  Uint8List? get remoteCipherKey => _transport._remoteCipherKey;
+  set remoteCipherKey(Uint8List? value) => _transport._remoteCipherKey = value;
+
+  Uint8List? get localIV => _transport._localIV;
+  set localIV(Uint8List? value) => _transport._localIV = value;
+
+  Uint8List? get remoteIV => _transport._remoteIV;
+  set remoteIV(Uint8List? value) => _transport._remoteIV = value;
+
+  Mac? get localMac => _transport._localMac;
+  set localMac(Mac? value) => _transport._localMac = value;
+
+  Mac? get remoteMac => _transport._remoteMac;
+  set remoteMac(Mac? value) => _transport._remoteMac = value;
+
+  bool get kexInProgress => _transport._kexInProgress;
+  set kexInProgress(bool value) => _transport._kexInProgress = value;
+
+  set sentKexInit(bool value) => _transport._sentKexInit = value;
+
+  set isFirstKex(bool value) => _transport._isFirstKex = value;
+
+  set strictKex(bool value) => _transport._strictKex = value;
+
+  ChunkBuffer get buffer => _transport._buffer;
+
+  SSHPacketSN get localPacketSN => _transport._localPacketSN;
+
+  SSHPacketSN get remotePacketSN => _transport._remotePacketSN;
+
+  List<Uint8List> get rekeyPendingPackets => _transport._rekeyPendingPackets;
+
+  Future<void> processPackets() => _transport._processPackets();
+
+  Future<void> handleMessage(Uint8List message) =>
+      _transport._handleMessage(message);
+
+  Future<void> handleMessageKexInit(Uint8List payload) =>
+      _transport._handleMessageKexInit(payload);
+
+  Future<void> handleMessageKexReply(Uint8List payload) =>
+      _transport._handleMessageKexReply(payload);
+
+  Future<void> handleMessageNewKeys(Uint8List message) =>
+      _transport._handleMessageNewKeys(message);
+
+  void handleMessageExtInfo(Uint8List payload) =>
+      _transport._handleMessageExtInfo(payload);
+
+  void sendKexInit() => _transport._sendKexInit();
+
+  void sendNewKeys() => _transport._sendNewKeys();
+
+  void applyLocalKeys() => _transport._applyLocalKeys();
+
+  void applyRemoteKeys() => _transport._applyRemoteKeys();
+
+  Uint8List? consumePacket() => _transport._consumePacket();
+
+  Uint8List? consumeChaChaPacket() => _transport._consumeChaChaPacket();
+
+  Uint8List? consumeAeadPacket(SSHCipherType cipherType) =>
+      _transport._consumeAeadPacket(cipherType);
+
+  void verifyPacketLength(int packetLength) =>
+      _transport._verifyPacketLength(packetLength);
+
+  Uint8List nonceForSequence(Uint8List iv, int sequence) =>
+      _transport._nonceForSequence(iv, sequence);
 }
