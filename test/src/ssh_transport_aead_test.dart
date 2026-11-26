@@ -5,6 +5,8 @@
 library;
 
 import 'dart:async';
+// Deprecated in Dart 3.14, still needed here to reach private state.
+// ignore: deprecated_member_use
 import 'dart:mirrors';
 import 'dart:typed_data';
 
