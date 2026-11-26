@@ -395,6 +395,14 @@ class SSHClient {
 
   final _exhaustedAuthMethods = <SSHAuthMethod>{};
 
+  /// Advances every time authentication moves on, so a credential callback or
+  /// signer that completes after its attempt was superseded can tell, and
+  /// neither sends a stale request nor closes the connection.
+  var _authGeneration = 0;
+
+  bool _isAuthCurrent(int generation) =>
+      !isClosed && !_authenticated.isCompleted && generation == _authGeneration;
+
   final _identitiesLeft = Queue<SSHIdentity>();
 
   final _hostbasedIdentitiesLeft = Queue<SSHIdentity>();
@@ -1047,8 +1055,13 @@ class SSHClient {
   }
 
   void _catch(FutureOr<dynamic> Function() fn) {
+    final generation = _authGeneration;
     Future.sync(fn).catchError((e, st) {
-      _transport.closeWithError(SSHInternalError(e), st);
+      // An attempt that was superseded, or a connection that has since
+      // authenticated or closed, must not be torn down by a late failure.
+      if (_isAuthCurrent(generation)) {
+        _transport.closeWithError(SSHInternalError(e), st);
+      }
     });
   }
 
@@ -1131,6 +1144,7 @@ class SSHClient {
   }
 
   void _handleUserauthSuccess() {
+    if (isClosed || _authenticated.isCompleted) return;
     printTrace?.call('<- $socket: SSH_Message_Userauth_Success');
     printDebug?.call('SSHClient._handleUserauthSuccess');
     _authTimeoutTimer?.cancel();
@@ -1159,6 +1173,8 @@ class SSHClient {
   }
 
   void _handleUserauthFailure(Uint8List payload) {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
     final message = SSH_Message_Userauth_Failure.decode(payload);
     printTrace?.call('<- $socket: $message');
     printDebug?.call('SSHClient._handleUserauthFailure');
@@ -1188,6 +1204,8 @@ class SSHClient {
   }
 
   void _handleUserauthIntermidiate(Uint8List payload) {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
     printDebug?.call('SSHClient._handleUserauthIntermidiate');
 
     switch (_currentAuthMethod) {
@@ -1203,6 +1221,7 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthPKOk(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthPKOk');
     final message = SSH_Message_Userauth_PK_Ok.decode(payload);
     printTrace?.call('<- $socket: $message');
@@ -1221,7 +1240,7 @@ class SSHClient {
 
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.publicKey) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
@@ -1236,6 +1255,7 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthPasswordChangeRequest(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthPasswordChangeRequest');
     final message = SSH_Message_Userauth_Passwd_ChangeReq.decode(payload);
     printTrace?.call('<- $socket: $message');
@@ -1243,6 +1263,7 @@ class SSHClient {
     // A server may ask for a new password whether or not the application can
     // provide one, so a missing handler declines the change like a null reply.
     final response = await onChangePasswordRequest?.call(message.prompt);
+    if (!_isAuthCurrent(generation)) return;
     if (response == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.password);
       return _tryNextAuthMethod();
@@ -1256,6 +1277,7 @@ class SSHClient {
   }
 
   Future<void> _handleUserauthInfoRequest(Uint8List payload) async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._handleUserauthInfoRequest');
     final message = SSH_Message_Userauth_InfoRequest.decode(payload);
     printTrace?.call('<- $socket: $message');
@@ -1263,6 +1285,8 @@ class SSHClient {
     final responses = await onUserInfoRequest!(
       SSHUserInfoRequest(message.name, message.instruction, message.prompts),
     );
+
+    if (!_isAuthCurrent(generation)) return;
 
     if (responses == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.keyboardInteractive);
@@ -1594,6 +1618,8 @@ class SSHClient {
   }
 
   void _tryNextAuthMethod() {
+    if (isClosed || _authenticated.isCompleted) return;
+    _authGeneration++;
     printDebug?.call('SSHClient._tryNextAuthenticationMethod');
 
     if (_authMethodsLeft.isEmpty) {
@@ -1626,9 +1652,11 @@ class SSHClient {
   }
 
   Future<void> _authWithPassword() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithPassword');
 
     final password = await onPasswordRequest!();
+    if (!_isAuthCurrent(generation)) return;
     if (password == null) {
       _exhaustedAuthMethods.add(SSHAuthMethod.password);
       _tryNextAuthMethod();
@@ -1641,6 +1669,7 @@ class SSHClient {
   }
 
   Future<void> _authWithNextPublicKey() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithPublicKey');
 
     if (_identitiesLeft.isEmpty) {
@@ -1678,7 +1707,7 @@ class SSHClient {
 
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.publicKey) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
@@ -1700,6 +1729,7 @@ class SSHClient {
   }
 
   Future<void> _authWithNextHostbased() async {
+    final generation = _authGeneration;
     printDebug?.call('SSHClient._authWithHostbased');
 
     if (_hostbasedIdentitiesLeft.isEmpty) {
@@ -1720,7 +1750,7 @@ class SSHClient {
     );
     final signature = await identity.sign(challenge);
 
-    if (isClosed || _currentAuthMethod != SSHAuthMethod.hostbased) {
+    if (!_isAuthCurrent(generation)) {
       return;
     }
 
