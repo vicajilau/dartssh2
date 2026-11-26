@@ -1619,7 +1619,6 @@ class SSHClient {
 
   void _tryNextAuthMethod() {
     if (isClosed || _authenticated.isCompleted) return;
-    _authGeneration++;
     printDebug?.call('SSHClient._tryNextAuthenticationMethod');
 
     if (_authMethodsLeft.isEmpty) {
@@ -1632,10 +1631,12 @@ class SSHClient {
     _currentAuthMethod = _authMethodsLeft.removeFirst();
     printDebug?.call('_currentAuthMethod = $_currentAuthMethod');
 
-    // Every method goes through _catch, the synchronous ones included. This
-    // can run from inside a callback whose attempt has just been superseded,
-    // and that callback's _catch ignores what it no longer owns, so a failure
-    // here must be reported under the new generation, not left to bubble up.
+    // This can run from inside a callback, whose _catch ignores failures once
+    // its attempt is superseded. So the generation advances only here, with
+    // nothing left that could throw before the next method starts, and every
+    // method, the synchronous ones included, goes through a _catch of its own
+    // that reports its failures under the new generation.
+    _authGeneration++;
     switch (_currentAuthMethod!) {
       case SSHAuthMethod.none:
         return _catch(_authWithNone);

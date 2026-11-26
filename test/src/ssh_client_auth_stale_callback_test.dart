@@ -26,6 +26,7 @@ void main() {
     SSHChangePasswordRequestHandler? changePassword,
     List<SSHIdentity>? identities,
     List<SSHIdentity>? hostbased,
+    void Function(String? message)? printDebug,
   }) {
     sent = [];
     socket = _FakeSSHSocket();
@@ -40,6 +41,7 @@ void main() {
       hostName: hostbased == null ? null : 'client.example.',
       userNameOnClientHost: hostbased == null ? null : 'test-user',
       keepAliveInterval: null,
+      printDebug: printDebug,
       printTrace: (message) {
         if (message != null && message.startsWith('-> ')) sent.add(message);
       },
@@ -282,8 +284,37 @@ void main() {
       await aborted;
 
       expect(client.isClosed, isTrue);
-    });
+      // Without the fix authentication hangs, so fail fast rather than wait
+      // out the default 30 s.
+    }, timeout: const Timeout(Duration(seconds: 5)));
   }
+
+  test('a throwing printDebug while picking the next method closes', () async {
+    final password = Completer<String?>();
+    create(
+      password: () => password.future,
+      interactive: (_) => const [],
+      printDebug: (message) {
+        if (message ==
+            '_currentAuthMethod = SSHAuthMethod.keyboardInteractive') {
+          throw StateError('logger failed');
+        }
+      },
+    );
+    await start();
+    final aborted = expectLater(
+      client.authenticated,
+      throwsA(
+        isA<SSHAuthAbortError>()
+            .having((e) => e.reason, 'reason', isA<SSHInternalError>()),
+      ),
+    );
+
+    password.complete(null);
+    await aborted;
+
+    expect(client.isClosed, isTrue);
+  }, timeout: const Timeout(Duration(seconds: 5)));
 }
 
 class _FakeSSHSocket implements SSHSocket {
