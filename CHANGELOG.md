@@ -1,9 +1,9 @@
 ## Unreleased
-- Added `SSHClient.disconnect()`, which sends `SSH_MSG_DISCONNECT` before closing, so the server logs a clean disconnect instead of a dropped connection. Use it when closing on purpose; `close()` is unchanged [#250]. Thanks [@hhoao].
+- Added `SSHClient.disconnect()`, which sends `SSH_MSG_DISCONNECT` before closing, so the server logs a clean disconnect instead of a dropped connection. Use it when closing on purpose; `close()` is unchanged [#250].
 - Fixed the connection closing when the server asks to change an expired password and `onChangePasswordRequest` is not set. The client now moves on to the next authentication method [#253].
 - Added ML-KEM-768 (FIPS 203), groundwork for the post-quantum key exchange `mlkem768x25519-sha256`. It is not used yet [#255].
 - Removed `dart:mirrors` from the test suite, which Dart 3.14 deprecates. The public API is unchanged [#257].
-- Fixed credential callbacks and signers that finish late acting on an attempt that is already over. A result that arrives after authentication has moved on, succeeded or been closed is now ignored rather than sent, and a late error no longer closes the connection [#251] [#258] [#259]. Thanks [@korellas].
+- Fixed credential callbacks and signers that finish late acting on an attempt that is already over. A result that arrives after authentication has moved on, succeeded or been closed is now ignored rather than sent, and a late error no longer closes the connection [#251] [#258] [#259].
 
 ## [4.1.0] - 2026-09-04
 - Added `SSHClient.pipelineChannelRequests`, off by default, which sends all of a session's channel requests before reading any reply instead of waiting for each one in turn. `execute` and `shell` send `env`, agent forwarding, `pty-req` and `x11-req` ahead of `exec` or `shell`, and each of them cost a round trip: against a server 40 ms away, `execute` with a pty measured 246 ms before and 206 ms after. RFC 4254 §5.4 permits sending further messages without waiting and §4 requires the peer to answer a channel's requests in the order it received them, which is what `ssh(1)` relies on when it does the same thing. Setting it also adopts OpenSSH's reporting, because it has to: the command is on the wire before a refusal can come back, so a refused `pty-req`, `env`, agent forwarding or `x11-req` is reported through `printDebug` and the command runs, the way `ssh(1)` prints `PTY allocation request failed on channel 0` and carries on, rather than throwing an error that means the command has already run. Only a refused `exec` or `shell` still throws `SSHChannelRequestError`, because nothing has run when that one fails. Leaving it unset changes nothing, down to the order the requests go out and the message of every error [#243].
@@ -477,12 +477,3 @@
 [@GT-610]: https://github.com/GT-610
 [@cesarcamps]: https://github.com/cesarcamps
 [@klc]: https://github.com/klc
-[@hhoao]: https://github.com/hhoao
-[@korellas]: https://github.com/korellas
-[@cbenhagen]: https://github.com/cbenhagen
-[@isegal]: https://github.com/isegal
-[@keinstn]: https://github.com/keinstn
-[@nickn17]: https://github.com/nickn17
-[@nuclear06]: https://github.com/nuclear06
-[@shihuili1218]: https://github.com/shihuili1218
-[@thyssentishman]: https://github.com/thyssentishman
