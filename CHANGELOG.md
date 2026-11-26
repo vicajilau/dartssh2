@@ -1,4 +1,4 @@
-## Unreleased
+## [4.2.0] - 2026-11-26
 
 - Added `SSHClient.disconnect()`, which sends `SSH_MSG_DISCONNECT` before closing, so the server logs a clean disconnect instead of a dropped connection. Use it when closing on purpose; `close()` is unchanged. [#250](https://github.com/vicajilau/dartssh2/pull/250)
 - Fixed the connection closing when the server asks to change an expired password and `onChangePasswordRequest` is not set. The client now moves on to the next authentication method. [#253](https://github.com/vicajilau/dartssh2/pull/253)
