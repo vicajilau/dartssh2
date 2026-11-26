@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
 import 'package:dartssh2/src/ssh_channel_id.dart';
@@ -231,20 +233,20 @@ SSH_Message_Channel_Confirmation _confirmation(int recipientChannel) {
 }
 
 Future<SSHChannelController> _openSessionChannel(SSHClient client) =>
-    client.testHooks.openSessionChannel();
+    clientTestHooks(client).openSessionChannel();
 
 /// The channel IDs with an open still awaiting a confirmation or failure.
 Iterable<SSHChannelId> _pendingChannelOpens(SSHClient client) =>
-    client.testHooks.pendingChannelOpens;
+    clientTestHooks(client).pendingChannelOpens;
 
 Map<SSHChannelId, SSHChannelController> _openChannels(SSHClient client) =>
-    client.testHooks.channels;
+    clientTestHooks(client).channels;
 
 Set<SSHChannelId> _allocatedChannelIds(SSHClient client) =>
-    client.testHooks.channelIdAllocator.allocatedIds;
+    clientTestHooks(client).channelIdAllocator.allocatedIds;
 
 void _disableRekeyBuffer(SSHClient client) {
-  client.testHooks.transport.testHooks.kexInProgress = false;
+  transportTestHooks(clientTestHooks(client).transport).kexInProgress = false;
 }
 
 class _FakeSSHSocket implements SSHSocket {

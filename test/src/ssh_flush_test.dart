@@ -6,6 +6,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
 import 'package:dartssh2/src/ssh_channel.dart';
 import 'package:test/test.dart';
 
@@ -44,7 +45,7 @@ void main() {
       await client.flush();
       expect(socket.flushCount, 1);
 
-      final channelController = client.testHooks.acceptChannel(
+      final channelController = clientTestHooks(client).acceptChannel(
         localChannelId: 1,
         remoteChannelId: 2,
         remoteInitialWindowSize: 1024,

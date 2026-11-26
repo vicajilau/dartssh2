@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/kex/kex_x25519.dart';
 import 'package:dartssh2/src/message/msg_kex_ecdh.dart';
 import 'package:dartssh2/src/message/msg_kex.dart';
@@ -40,7 +41,7 @@ Uint8List _encodeKexEcdhReply({
 /// (malformed length handling) and T-12 (MAC-before-padding ordering).
 ///
 /// These exercise the transport's send/receive paths directly through
-/// [SSHTransport.testHooks], as ssh_transport_aead_test.dart and
+/// [transportTestHooks], as ssh_transport_aead_test.dart and
 /// ssh_transport_strict_kex_test.dart do.
 void main() {
   group('T-05: padding is random', () {
@@ -62,13 +63,13 @@ void main() {
       Uint8List paddingOf(Uint8List payload) {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
-        transport.testHooks.clientMacType = macType;
-        transport.testHooks.localMacType = macType;
-        transport.testHooks.encryptCipher =
+        transportTestHooks(transport).clientMacType = macType;
+        transportTestHooks(transport).localMacType = macType;
+        transportTestHooks(transport).encryptCipher =
             cipherType.createCipher(key, iv, forEncryption: true);
-        transport.testHooks.localMac = macType.createMac(macKey);
-        transport.testHooks.kexInProgress = false;
-        transport.testHooks.localPacketSN.value = 0;
+        transportTestHooks(transport).localMac = macType.createMac(macKey);
+        transportTestHooks(transport).kexInProgress = false;
+        transportTestHooks(transport).localPacketSN.value = 0;
 
         transport.sendPacket(payload);
         final packet = socket.packets.last;
@@ -115,12 +116,12 @@ void main() {
         Uint8List paddingOf(Uint8List payload) {
           final socket = _CaptureSSHSocket();
           final transport = SSHTransport(socket);
-          transport.testHooks.clientCipherType = cipherType;
-          transport.testHooks.localCipherType = cipherType;
-          transport.testHooks.localCipherKey = key;
-          transport.testHooks.localIV = iv;
-          transport.testHooks.kexInProgress = false;
-          transport.testHooks.localPacketSN.value = 0;
+          transportTestHooks(transport).clientCipherType = cipherType;
+          transportTestHooks(transport).localCipherType = cipherType;
+          transportTestHooks(transport).localCipherKey = key;
+          transportTestHooks(transport).localIV = iv;
+          transportTestHooks(transport).kexInProgress = false;
+          transportTestHooks(transport).localPacketSN.value = 0;
 
           transport.sendPacket(payload);
           final packet = socket.packets.last;
@@ -184,13 +185,13 @@ void main() {
 
       final senderSocket = _CaptureSSHSocket();
       final sender = SSHTransport(senderSocket);
-      sender.testHooks.clientMacType = macType;
-      sender.testHooks.localMacType = macType;
-      sender.testHooks.encryptCipher =
+      transportTestHooks(sender).clientMacType = macType;
+      transportTestHooks(sender).localMacType = macType;
+      transportTestHooks(sender).encryptCipher =
           cipherType.createCipher(key, iv, forEncryption: true);
-      sender.testHooks.localMac = macType.createMac(macKey);
-      sender.testHooks.kexInProgress = false;
-      sender.testHooks.localPacketSN.value = 0;
+      transportTestHooks(sender).localMac = macType.createMac(macKey);
+      transportTestHooks(sender).kexInProgress = false;
+      transportTestHooks(sender).localPacketSN.value = 0;
 
       sender.sendPacket(payload);
       final encrypted = senderSocket.packets.last;
@@ -204,14 +205,14 @@ void main() {
           return true;
         },
       );
-      receiver.testHooks.remoteVersion = 'SSH-2.0-test';
-      receiver.testHooks.serverMacType = macType;
-      receiver.testHooks.remoteMacType = macType;
-      receiver.testHooks.decryptCipher =
+      transportTestHooks(receiver).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(receiver).serverMacType = macType;
+      transportTestHooks(receiver).remoteMacType = macType;
+      transportTestHooks(receiver).decryptCipher =
           cipherType.createCipher(key, iv, forEncryption: false);
-      receiver.testHooks.remoteMac = macType.createMac(macKey);
-      receiver.testHooks.kexInProgress = false;
-      receiver.testHooks.remotePacketSN.value = 0;
+      transportTestHooks(receiver).remoteMac = macType.createMac(macKey);
+      transportTestHooks(receiver).kexInProgress = false;
+      transportTestHooks(receiver).remotePacketSN.value = 0;
 
       receiverSocket.addIncomingBytes(encrypted);
 
@@ -245,7 +246,7 @@ void main() {
 
       for (final packetLength in [0, 1, 4]) {
         expect(
-          () => transport.testHooks.verifyPacketLength(packetLength),
+          () => transportTestHooks(transport).verifyPacketLength(packetLength),
           throwsA(isA<SSHPacketError>()),
           reason: 'packetLength=$packetLength should be rejected',
         );
@@ -259,7 +260,7 @@ void main() {
       final transport = SSHTransport(socket);
 
       expect(
-        () => transport.testHooks.verifyPacketLength(16),
+        () => transportTestHooks(transport).verifyPacketLength(16),
         returnsNormally,
       );
 
@@ -272,7 +273,7 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       // packetLength = 1 leaves no room for the mandatory padding, which
       // used to let readPaddingLength/sublistView read past the packet.
       final packet = Uint8List(4 + 1);
@@ -281,7 +282,7 @@ void main() {
       buffer.add(packet);
 
       expect(
-        () => transport.testHooks.consumePacket(),
+        () => transportTestHooks(transport).consumePacket(),
         throwsA(isA<SSHPacketError>()),
       );
 
@@ -305,12 +306,12 @@ void main() {
 
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
-      transport.testHooks.remoteCipherType = cipherType;
-      transport.testHooks.remoteMacType = macType;
-      transport.testHooks.decryptCipher =
+      transportTestHooks(transport).remoteCipherType = cipherType;
+      transportTestHooks(transport).remoteMacType = macType;
+      transportTestHooks(transport).decryptCipher =
           cipherType.createCipher(key, iv, forEncryption: false);
       final remoteMac = macType.createMac(macKey);
-      transport.testHooks.remoteMac = remoteMac;
+      transportTestHooks(transport).remoteMac = remoteMac;
 
       // The first decrypted block claims packetLength=20. Including the
       // four-byte length field gives 24 encrypted bytes, which is not aligned
@@ -328,11 +329,11 @@ void main() {
         ...Uint8List(bytesAfterFirstBlock),
       ]);
 
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(input);
 
       expect(
-        () => transport.testHooks.consumePacket(),
+        () => transportTestHooks(transport).consumePacket(),
         throwsA(
           isA<SSHPacketError>().having(
             (error) => error.toString(),
@@ -362,12 +363,12 @@ void main() {
 
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
-        transport.testHooks.remoteVersion = 'SSH-2.0-test';
-        transport.testHooks.serverCipherType = cipherType;
-        transport.testHooks.remoteCipherType = cipherType;
-        transport.testHooks.remoteCipherKey = key;
-        transport.testHooks.remoteIV = iv;
-        transport.testHooks.remotePacketSN.value = 0;
+        transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+        transportTestHooks(transport).serverCipherType = cipherType;
+        transportTestHooks(transport).remoteCipherType = cipherType;
+        transportTestHooks(transport).remoteCipherKey = key;
+        transportTestHooks(transport).remoteIV = iv;
+        transportTestHooks(transport).remotePacketSN.value = 0;
 
         // packetLength = 16, but the (encrypted) padding-length byte we put
         // in the plaintext is 255: payloadLength = 16 - 255 - 1 < 0.
@@ -380,11 +381,11 @@ void main() {
         cipher.init(true, AEADParameters(KeyParameter(key), 128, iv, aad));
         final encrypted = cipher.process(plaintext);
 
-        final dynamic buffer = transport.testHooks.buffer;
+        final dynamic buffer = transportTestHooks(transport).buffer;
         buffer.add(Uint8List.fromList([...aad, ...encrypted]));
 
         expect(
-          () => transport.testHooks.consumeAeadPacket(cipherType),
+          () => transportTestHooks(transport).consumeAeadPacket(cipherType),
           throwsA(isA<SSHPacketError>()),
         );
 
@@ -411,15 +412,15 @@ void main() {
 
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.serverCipherType = cipherType;
-      transport.testHooks.remoteCipherType = cipherType;
-      transport.testHooks.serverMacType = macType;
-      transport.testHooks.remoteMacType = macType;
-      transport.testHooks.decryptCipher =
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).serverCipherType = cipherType;
+      transportTestHooks(transport).remoteCipherType = cipherType;
+      transportTestHooks(transport).serverMacType = macType;
+      transportTestHooks(transport).remoteMacType = macType;
+      transportTestHooks(transport).decryptCipher =
           cipherType.createCipher(key, iv, forEncryption: false);
-      transport.testHooks.remoteMac = macType.createMac(macKey);
-      transport.testHooks.remotePacketSN.value = 0;
+      transportTestHooks(transport).remoteMac = macType.createMac(macKey);
+      transportTestHooks(transport).remotePacketSN.value = 0;
 
       // One AES block (16 bytes): packetLength=12, padding length byte=1
       // (invalid: SSH requires padding length >= 4).
@@ -435,11 +436,11 @@ void main() {
       final wrongMac = Uint8List(macType.createMac(macKey).macSize)
         ..fillRange(0, macType.createMac(macKey).macSize, 0xFF);
 
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(Uint8List.fromList([...ciphertext, ...wrongMac]));
 
       expect(
-        () => transport.testHooks.consumePacket(),
+        () => transportTestHooks(transport).consumePacket(),
         throwsA(
           isA<SSHPacketError>().having(
             (error) => error.toString(),
@@ -462,18 +463,21 @@ void main() {
         disableHostkeyVerification: true,
       );
 
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.localKexInit = Uint8List.fromList([20, 1, 2, 3]);
-      transport.testHooks.remoteKexInit = Uint8List.fromList([20, 4, 5, 6]);
-      transport.testHooks.kexType = SSHKexType.x25519;
-      transport.testHooks.hostkeyType = SSHHostkeyType.ed25519;
-      transport.testHooks.clientCipherType = SSHCipherType.chacha20poly1305;
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).localKexInit =
+          Uint8List.fromList([20, 1, 2, 3]);
+      transportTestHooks(transport).remoteKexInit =
+          Uint8List.fromList([20, 4, 5, 6]);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).hostkeyType = SSHHostkeyType.ed25519;
+      transportTestHooks(transport).clientCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).kexInProgress = false;
 
       Uint8List buildReply(Uint8List hostKeyBytes) {
         // Simulates the fresh ephemeral key exchange a real rekey would
         // create.
-        transport.testHooks.kex = SSHKexX25519();
+        transportTestHooks(transport).kex = SSHKexX25519();
         return _encodeKexEcdhReply(
           hostPublicKey: hostKeyBytes,
           ecdhPublicKey: SSHKexX25519().publicKey,
@@ -483,11 +487,12 @@ void main() {
       }
 
       final firstHostKey = Uint8List.fromList(List<int>.filled(32, 1));
-      await transport.testHooks.handleMessageKexReply(buildReply(firstHostKey));
+      await transportTestHooks(transport)
+          .handleMessageKexReply(buildReply(firstHostKey));
 
-      expect(transport.testHooks.hostkeyVerified, isTrue);
+      expect(transportTestHooks(transport).hostkeyVerified, isTrue);
       expect(
-        transport.testHooks.verifiedHostkeyFingerprint,
+        transportTestHooks(transport).verifiedHostkeyFingerprint,
         isNotNull,
       );
       expect(transport.isClosed, isFalse);
@@ -503,7 +508,7 @@ void main() {
         transport.done,
         throwsA(isA<SSHHostkeyError>()),
       );
-      await transport.testHooks
+      await transportTestHooks(transport)
           .handleMessageKexReply(buildReply(secondHostKey));
 
       expect(transport.isClosed, isTrue);
@@ -517,20 +522,22 @@ void main() {
         disableHostkeyVerification: true,
       );
 
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.localKexInit = Uint8List.fromList([20, 1, 2, 3]);
-      transport.testHooks.remoteKexInit = Uint8List.fromList([20, 4, 5, 6]);
-      transport.testHooks.kexType = SSHKexType.x25519;
-      transport.testHooks.hostkeyType = SSHHostkeyType.ed25519;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).localKexInit =
+          Uint8List.fromList([20, 1, 2, 3]);
+      transportTestHooks(transport).remoteKexInit =
+          Uint8List.fromList([20, 4, 5, 6]);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).hostkeyType = SSHHostkeyType.ed25519;
       // Any AEAD cipher spares setting up a MAC; AES-GCM, unlike
       // ChaCha20-Poly1305, also runs in the browser.
-      transport.testHooks.clientCipherType = SSHCipherType.aes128gcm;
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128gcm;
+      transportTestHooks(transport).kexInProgress = false;
 
       final hostKey = Uint8List.fromList(List<int>.filled(32, 7));
 
       Uint8List buildReply() {
-        transport.testHooks.kex = SSHKexX25519();
+        transportTestHooks(transport).kex = SSHKexX25519();
         return _encodeKexEcdhReply(
           hostPublicKey: hostKey,
           ecdhPublicKey: SSHKexX25519().publicKey,
@@ -538,11 +545,11 @@ void main() {
         );
       }
 
-      await transport.testHooks.handleMessageKexReply(buildReply());
+      await transportTestHooks(transport).handleMessageKexReply(buildReply());
       expect(transport.isClosed, isFalse);
 
       // Same host key presented again on rekey: must not be rejected.
-      await transport.testHooks.handleMessageKexReply(buildReply());
+      await transportTestHooks(transport).handleMessageKexReply(buildReply());
 
       expect(transport.isClosed, isFalse);
 
@@ -558,15 +565,19 @@ void main() {
       // Drop what it wrote so the counts below only see the rekey.
       socket.packets.clear();
 
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.localKexInit = Uint8List.fromList([20, 1, 2, 3]);
-      transport.testHooks.remoteKexInit = Uint8List.fromList([20, 4, 5, 6]);
-      transport.testHooks.kexType = SSHKexType.x25519;
-      transport.testHooks.hostkeyType = SSHHostkeyType.ed25519;
-      transport.testHooks.clientCipherType = SSHCipherType.chacha20poly1305;
-      transport.testHooks.serverCipherType = SSHCipherType.chacha20poly1305;
-      transport.testHooks.kexInProgress = false;
-      transport.testHooks.sentKexInit = false;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).localKexInit =
+          Uint8List.fromList([20, 1, 2, 3]);
+      transportTestHooks(transport).remoteKexInit =
+          Uint8List.fromList([20, 4, 5, 6]);
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).hostkeyType = SSHHostkeyType.ed25519;
+      transportTestHooks(transport).clientCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).serverCipherType =
+          SSHCipherType.chacha20poly1305;
+      transportTestHooks(transport).kexInProgress = false;
+      transportTestHooks(transport).sentKexInit = false;
     }
 
     /// Drives [transport] through the rest of an exchange the way the server
@@ -575,14 +586,15 @@ void main() {
       SSHTransport transport,
       Uint8List hostKey,
     ) async {
-      transport.testHooks.kex = SSHKexX25519();
-      await transport.testHooks.handleMessageKexReply(_encodeKexEcdhReply(
+      transportTestHooks(transport).kex = SSHKexX25519();
+      await transportTestHooks(transport)
+          .handleMessageKexReply(_encodeKexEcdhReply(
         hostPublicKey: hostKey,
         ecdhPublicKey: SSHKexX25519().publicKey,
         // Never checked: disableHostkeyVerification is true.
         signature: Uint8List(4),
       ));
-      await transport.testHooks.handleMessageNewKeys(
+      await transportTestHooks(transport).handleMessageNewKeys(
           Uint8List.fromList([SSH_Message_NewKeys.messageId]));
     }
 
@@ -616,7 +628,7 @@ void main() {
 
       await rekeyDone;
       expect(completed, isTrue);
-      expect(transport.testHooks.kexInProgress, isFalse);
+      expect(transportTestHooks(transport).kexInProgress, isFalse);
 
       await transport.close();
     });

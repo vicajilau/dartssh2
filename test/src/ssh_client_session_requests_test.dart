@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_channel.dart';
 import 'package:dartssh2/src/message/msg_userauth.dart';
 import 'package:dartssh2/src/ssh_message.dart';
@@ -337,14 +339,14 @@ SSH_Message_Channel_Close _close() =>
 
 /// The channel's queue of replies it has asked for and not yet received.
 AsyncQueue<bool> _replyQueue(SSHClient client) =>
-    client.testHooks.channels[0]!.requestReplyQueue;
+    clientTestHooks(client).channels[0]!.requestReplyQueue;
 
 void _authenticate(SSHClient client) {
   client.handlePacket(SSH_Message_Userauth_Success().encode());
 }
 
 void _disableRekeyBuffer(SSHClient client) {
-  client.testHooks.transport.testHooks.kexInProgress = false;
+  transportTestHooks(clientTestHooks(client).transport).kexInProgress = false;
 }
 
 class _FakeSSHSocket implements SSHSocket {

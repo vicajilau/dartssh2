@@ -131,11 +131,6 @@ class SSHTransport {
   /// `true` if the connection is closed normally or due to an error.
   bool get isClosed => _doneCompleter.isCompleted;
 
-  /// Internal state, for this package's own tests only. See
-  /// [SSHTransportTestHooks].
-  @visibleForTesting
-  SSHTransportTestHooks get testHooks => SSHTransportTestHooks._(this);
-
   /// Identification string sent by the other side. For example, "SSH-2.0-OpenSSH_7.4p1".
   /// May be `null` if the handshake has not yet completed.
   String? get remoteVersion => _remoteVersion;
@@ -2075,39 +2070,38 @@ class SSHTransport {
   }
 }
 
-/// Internal state of an [SSHTransport], for this package's own tests.
+/// Internal state of [transport], for this package's own tests.
 ///
 /// The transport implements only the client side of the key exchange, so its
 /// tests cannot run a real handshake in memory. They set up the state one
 /// would leave behind (negotiated algorithms, keys, sequence numbers) and
-/// drive the steps that follow it. This is not part of the public API: it is
-/// hidden from `package:dartssh2/dartssh2.dart` and may change in any release.
+/// drive the steps that follow it. This is not part of the public API: like
+/// [SSHTransportTestHooks], it is hidden from `package:dartssh2/dartssh2.dart`,
+/// so [SSHTransport] itself gains no member, and it may change in any release.
+@visibleForTesting
+SSHTransportTestHooks transportTestHooks(SSHTransport transport) =>
+    SSHTransportTestHooks._(transport);
+
+/// See [transportTestHooks].
 @visibleForTesting
 class SSHTransportTestHooks {
   SSHTransportTestHooks._(this._transport);
 
   final SSHTransport _transport;
 
-  String? get remoteVersion => _transport._remoteVersion;
   set remoteVersion(String? value) => _transport._remoteVersion = value;
 
-  Uint8List get localKexInit => _transport._localKexInit;
   set localKexInit(Uint8List value) => _transport._localKexInit = value;
 
-  Uint8List get remoteKexInit => _transport._remoteKexInit;
   set remoteKexInit(Uint8List value) => _transport._remoteKexInit = value;
 
-  SSHKexType? get kexType => _transport._kexType;
   set kexType(SSHKexType? value) => _transport._kexType = value;
 
-  SSHHostkeyType? get hostkeyType => _transport._hostkeyType;
   set hostkeyType(SSHHostkeyType? value) => _transport._hostkeyType = value;
 
-  SSHCipherType? get clientCipherType => _transport._clientCipherType;
   set clientCipherType(SSHCipherType? value) =>
       _transport._clientCipherType = value;
 
-  SSHCipherType? get serverCipherType => _transport._serverCipherType;
   set serverCipherType(SSHCipherType? value) =>
       _transport._serverCipherType = value;
 
@@ -2119,10 +2113,8 @@ class SSHTransportTestHooks {
   set remoteCipherType(SSHCipherType? value) =>
       _transport._remoteCipherType = value;
 
-  SSHMacType? get clientMacType => _transport._clientMacType;
   set clientMacType(SSHMacType? value) => _transport._clientMacType = value;
 
-  SSHMacType? get serverMacType => _transport._serverMacType;
   set serverMacType(SSHMacType? value) => _transport._serverMacType = value;
 
   SSHMacType? get localMacType => _transport._localMacType;
@@ -2131,24 +2123,17 @@ class SSHTransportTestHooks {
   SSHMacType? get remoteMacType => _transport._remoteMacType;
   set remoteMacType(SSHMacType? value) => _transport._remoteMacType = value;
 
-  SSHKex? get kex => _transport._kex;
   set kex(SSHKex? value) => _transport._kex = value;
 
-  Uint8List? get sessionId => _transport._sessionId;
   set sessionId(Uint8List? value) => _transport._sessionId = value;
 
-  Uint8List? get exchangeHash => _transport._exchangeHash;
   set exchangeHash(Uint8List? value) => _transport._exchangeHash = value;
 
   bool get hostkeyVerified => _transport._hostkeyVerified;
-  set hostkeyVerified(bool value) => _transport._hostkeyVerified = value;
 
   Uint8List? get verifiedHostkeyFingerprint =>
       _transport._verifiedHostkeyFingerprint;
-  set verifiedHostkeyFingerprint(Uint8List? value) =>
-      _transport._verifiedHostkeyFingerprint = value;
 
-  BigInt? get sharedSecret => _transport._sharedSecret;
   set sharedSecret(BigInt? value) => _transport._sharedSecret = value;
 
   BlockCipher? get encryptCipher => _transport._encryptCipher;
@@ -2188,13 +2173,10 @@ class SSHTransportTestHooks {
   bool get kexInProgress => _transport._kexInProgress;
   set kexInProgress(bool value) => _transport._kexInProgress = value;
 
-  bool get sentKexInit => _transport._sentKexInit;
   set sentKexInit(bool value) => _transport._sentKexInit = value;
 
-  bool get isFirstKex => _transport._isFirstKex;
   set isFirstKex(bool value) => _transport._isFirstKex = value;
 
-  bool get strictKex => _transport._strictKex;
   set strictKex(bool value) => _transport._strictKex = value;
 
   ChunkBuffer get buffer => _transport._buffer;

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_userauth.dart';
 import 'package:test/test.dart';
 
@@ -12,7 +14,7 @@ void main() {
     client.handlePacket(SSH_Message_Userauth_Success().encode());
     await client.authenticated;
 
-    final channelController = client.testHooks.acceptChannel(
+    final channelController = clientTestHooks(client).acceptChannel(
       localChannelId: 99,
       remoteChannelId: 100,
       remoteInitialWindowSize: 0,
@@ -34,7 +36,8 @@ void main() {
 
     await Future.wait(expectations);
     expect(
-      () => client.testHooks.handleTransportClosed(SSHStateError('later')),
+      () =>
+          clientTestHooks(client).handleTransportClosed(SSHStateError('later')),
       returnsNormally,
     );
 
@@ -62,7 +65,7 @@ void main() {
     );
     client.handlePacket(SSH_Message_Userauth_Success().encode());
     await client.authenticated;
-    client.testHooks.transport.testHooks.kexInProgress = false;
+    transportTestHooks(clientTestHooks(client).transport).kexInProgress = false;
 
     final error = StateError('write failed');
     socket.writeError = error;

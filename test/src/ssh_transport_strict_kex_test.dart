@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_debug.dart';
 import 'package:dartssh2/src/message/msg_ext_info.dart';
 import 'package:dartssh2/src/message/msg_ignore.dart';
@@ -67,7 +68,7 @@ void main() {
 
       // A server only sends its KEXINIT after seeing the peer version, so
       // trigger it explicitly.
-      transport.testHooks.sendKexInit();
+      transportTestHooks(transport).sendKexInit();
 
       final packet = socket.packets[1];
       final paddingLength = SSHPacket.readPaddingLength(packet);
@@ -91,12 +92,12 @@ void main() {
 
       // Simulate the initial exchange having finished, so the next
       // _sendKexInit is a re-key rather than a no-op.
-      transport.testHooks.isFirstKex = false;
-      transport.testHooks.kexInProgress = false;
-      transport.testHooks.sentKexInit = false;
+      transportTestHooks(transport).isFirstKex = false;
+      transportTestHooks(transport).kexInProgress = false;
+      transportTestHooks(transport).sentKexInit = false;
       socket.packets.clear();
 
-      transport.testHooks.sendKexInit();
+      transportTestHooks(transport).sendKexInit();
 
       final packet = socket.packets.last;
       final paddingLength = SSHPacket.readPaddingLength(packet);
@@ -123,10 +124,10 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.kexInProgress = true;
-      transport.testHooks.sentKexInit = true;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
 
-      await transport.testHooks.handleMessageKexInit(serverKexInit(
+      await transportTestHooks(transport).handleMessageKexInit(serverKexInit(
         extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
       ).encode());
 
@@ -139,10 +140,11 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.kexInProgress = true;
-      transport.testHooks.sentKexInit = true;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
 
-      await transport.testHooks.handleMessageKexInit(serverKexInit().encode());
+      await transportTestHooks(transport)
+          .handleMessageKexInit(serverKexInit().encode());
 
       expect(transport.strictKex, isFalse);
 
@@ -153,12 +155,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.kexInProgress = true;
-      transport.testHooks.sentKexInit = true;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
 
       // A client must only accept the server indicator. Echoing back the
       // client one must not turn the mode on.
-      await transport.testHooks.handleMessageKexInit(serverKexInit(
+      await transportTestHooks(transport).handleMessageKexInit(serverKexInit(
         extraKexAlgorithms: const ['kex-strict-c-v00@openssh.com'],
       ).encode());
 
@@ -171,14 +173,14 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.kexInProgress = true;
-      transport.testHooks.sentKexInit = true;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).sentKexInit = true;
       // Something was received before the KEXINIT, which is exactly the
       // packet-insertion Terrapin relies on.
-      transport.testHooks.remotePacketSN.value = 1;
+      transportTestHooks(transport).remotePacketSN.value = 1;
 
       await expectLater(
-        transport.testHooks.handleMessageKexInit(serverKexInit(
+        transportTestHooks(transport).handleMessageKexInit(serverKexInit(
           extraKexAlgorithms: const ['kex-strict-s-v00@openssh.com'],
         ).encode()),
         throwsA(isA<SSHHandshakeError>()),
@@ -202,11 +204,11 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        transport.testHooks.strictKex = true;
-        transport.testHooks.kexInProgress = true;
+        transportTestHooks(transport).strictKex = true;
+        transportTestHooks(transport).kexInProgress = true;
 
         await expectLater(
-          transport.testHooks.handleMessage(entry.value),
+          transportTestHooks(transport).handleMessage(entry.value),
           throwsA(isA<SSHHandshakeError>()),
         );
 
@@ -217,10 +219,10 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        transport.testHooks.strictKex = true;
-        transport.testHooks.kexInProgress = false;
+        transportTestHooks(transport).strictKex = true;
+        transportTestHooks(transport).kexInProgress = false;
 
-        await transport.testHooks.handleMessage(entry.value);
+        await transportTestHooks(transport).handleMessage(entry.value);
 
         transport.close();
       });
@@ -229,10 +231,10 @@ void main() {
         final socket = _CaptureSSHSocket();
         final transport = SSHTransport(socket);
 
-        transport.testHooks.strictKex = false;
-        transport.testHooks.kexInProgress = true;
+        transportTestHooks(transport).strictKex = false;
+        transportTestHooks(transport).kexInProgress = true;
 
-        await transport.testHooks.handleMessage(entry.value);
+        await transportTestHooks(transport).handleMessage(entry.value);
 
         transport.close();
       });
@@ -242,28 +244,28 @@ void main() {
   group('Strict key exchange sequence numbers', () {
     /// Prepares the state [_applyRemoteKeys] needs so a NEWKEYS can be handled.
     void prepareKeys(SSHTransport transport) {
-      transport.testHooks.kexType = SSHKexType.x25519;
-      transport.testHooks.sharedSecret = BigInt.from(42);
-      transport.testHooks.exchangeHash =
+      transportTestHooks(transport).kexType = SSHKexType.x25519;
+      transportTestHooks(transport).sharedSecret = BigInt.from(42);
+      transportTestHooks(transport).exchangeHash =
           Uint8List.fromList(List<int>.filled(32, 1));
-      transport.testHooks.sessionId =
+      transportTestHooks(transport).sessionId =
           Uint8List.fromList(List<int>.filled(32, 2));
-      transport.testHooks.clientCipherType = SSHCipherType.aes128ctr;
-      transport.testHooks.serverCipherType = SSHCipherType.aes128ctr;
-      transport.testHooks.clientMacType = SSHMacType.hmacSha256;
-      transport.testHooks.serverMacType = SSHMacType.hmacSha256;
+      transportTestHooks(transport).clientCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).serverCipherType = SSHCipherType.aes128ctr;
+      transportTestHooks(transport).clientMacType = SSHMacType.hmacSha256;
+      transportTestHooks(transport).serverMacType = SSHMacType.hmacSha256;
     }
 
     test('local sequence number resets after sending NEWKEYS', () {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.strictKex = true;
-      transport.testHooks.localPacketSN.value = 7;
+      transportTestHooks(transport).strictKex = true;
+      transportTestHooks(transport).localPacketSN.value = 7;
 
-      transport.testHooks.sendNewKeys();
+      transportTestHooks(transport).sendNewKeys();
 
-      expect(transport.testHooks.localPacketSN.value, 0);
+      expect(transportTestHooks(transport).localPacketSN.value, 0);
 
       transport.close();
     });
@@ -272,12 +274,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
 
-      transport.testHooks.strictKex = false;
-      transport.testHooks.localPacketSN.value = 7;
+      transportTestHooks(transport).strictKex = false;
+      transportTestHooks(transport).localPacketSN.value = 7;
 
-      transport.testHooks.sendNewKeys();
+      transportTestHooks(transport).sendNewKeys();
 
-      expect(transport.testHooks.localPacketSN.value, 8);
+      expect(transportTestHooks(transport).localPacketSN.value, 8);
 
       transport.close();
     });
@@ -287,16 +289,16 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      transport.testHooks.strictKex = true;
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.remotePacketSN.value = 9;
+      transportTestHooks(transport).strictKex = true;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).remotePacketSN.value = 9;
 
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await transport.testHooks.processPackets();
+      await transportTestHooks(transport).processPackets();
 
-      expect(transport.testHooks.remotePacketSN.value, 0);
+      expect(transportTestHooks(transport).remotePacketSN.value, 0);
 
       transport.close();
     });
@@ -306,16 +308,16 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      transport.testHooks.strictKex = false;
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.remotePacketSN.value = 9;
+      transportTestHooks(transport).strictKex = false;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).remotePacketSN.value = 9;
 
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await transport.testHooks.processPackets();
+      await transportTestHooks(transport).processPackets();
 
-      expect(transport.testHooks.remotePacketSN.value, 10);
+      expect(transportTestHooks(transport).remotePacketSN.value, 10);
 
       transport.close();
     });
@@ -325,27 +327,27 @@ void main() {
       final transport = SSHTransport(socket);
 
       prepareKeys(transport);
-      transport.testHooks.strictKex = true;
-      transport.testHooks.remoteVersion = 'SSH-2.0-test';
-      transport.testHooks.remotePacketSN.value = 9;
+      transportTestHooks(transport).strictKex = true;
+      transportTestHooks(transport).remoteVersion = 'SSH-2.0-test';
+      transportTestHooks(transport).remotePacketSN.value = 9;
 
       // NEWKEYS resets to 0, then two ordinary packets take it to 2. They are
       // read as clear text because the remote keys are only applied to the
       // cipher once a non-null key is set, which this fixture does not do.
-      final dynamic buffer = transport.testHooks.buffer;
+      final dynamic buffer = transportTestHooks(transport).buffer;
       buffer.add(clearTextPacket(SSH_Message_NewKeys().encode()));
 
-      await transport.testHooks.processPackets();
-      expect(transport.testHooks.remotePacketSN.value, 0);
+      await transportTestHooks(transport).processPackets();
+      expect(transportTestHooks(transport).remotePacketSN.value, 0);
 
-      transport.testHooks.remoteCipherKey = null;
-      transport.testHooks.decryptCipher = null;
+      transportTestHooks(transport).remoteCipherKey = null;
+      transportTestHooks(transport).decryptCipher = null;
 
       buffer.add(clearTextPacket(Uint8List.fromList([94, 1, 2])));
       buffer.add(clearTextPacket(Uint8List.fromList([94, 3, 4])));
 
-      await transport.testHooks.processPackets();
-      expect(transport.testHooks.remotePacketSN.value, 2);
+      await transportTestHooks(transport).processPackets();
+      expect(transportTestHooks(transport).remotePacketSN.value, 2);
 
       transport.close();
     });
@@ -362,7 +364,7 @@ void main() {
         ),
       });
 
-      transport.testHooks.handleMessageExtInfo(message.encode());
+      transportTestHooks(transport).handleMessageExtInfo(message.encode());
 
       expect(
         transport.serverSigAlgs,
@@ -382,7 +384,7 @@ void main() {
         'delay-compression': Uint8List.fromList([1, 2, 3]),
       });
 
-      transport.testHooks.handleMessageExtInfo(message.encode());
+      transportTestHooks(transport).handleMessageExtInfo(message.encode());
 
       expect(transport.serverSigAlgs, isNull);
       expect(transport.extInfo!.keys, contains('delay-compression'));

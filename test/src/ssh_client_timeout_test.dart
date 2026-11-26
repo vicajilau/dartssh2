@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_client.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -31,7 +32,7 @@ void main() {
         authTimeout: const Duration(milliseconds: 10),
       );
 
-      client.testHooks.handleTransportReady();
+      clientTestHooks(client).handleTransportReady();
 
       await expectLater(
         client.authenticated,

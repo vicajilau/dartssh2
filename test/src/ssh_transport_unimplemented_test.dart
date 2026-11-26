@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:dartssh2/src/message/msg_debug.dart';
 import 'package:dartssh2/src/message/msg_disconnect.dart';
 import 'package:dartssh2/src/message/msg_ignore.dart';
@@ -47,10 +48,11 @@ void main() {
         onMessage: (_) => false,
       );
       socket.packets.clear();
-      transport.testHooks.kexInProgress = false;
-      transport.testHooks.remotePacketSN.value = 37;
+      transportTestHooks(transport).kexInProgress = false;
+      transportTestHooks(transport).remotePacketSN.value = 37;
 
-      await transport.testHooks.handleMessage(Uint8List.fromList([255]));
+      await transportTestHooks(transport)
+          .handleMessage(Uint8List.fromList([255]));
 
       expect(socket.packets, hasLength(1));
       expect(sentUnimplemented(socket.packets.single).sequenceNumber, 37);
@@ -61,7 +63,7 @@ void main() {
     test('surfaces the reason the peer gave for disconnecting', () async {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket);
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).kexInProgress = false;
 
       final expectation = expectLater(
         transport.done,
@@ -76,7 +78,7 @@ void main() {
         ),
       );
 
-      await transport.testHooks.handleMessage(SSH_Message_Disconnect(
+      await transportTestHooks(transport).handleMessage(SSH_Message_Disconnect(
         reasonCode: 2,
         description: 'no matching key exchange method found',
       ).encode());
@@ -95,10 +97,10 @@ void main() {
         },
       );
       socket.packets.clear();
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).kexInProgress = false;
       final channelData = Uint8List.fromList([94, 1, 2, 3]);
 
-      await transport.testHooks.handleMessage(channelData);
+      await transportTestHooks(transport).handleMessage(channelData);
 
       expect(received, [channelData]);
       expect(socket.packets, isEmpty);
@@ -114,10 +116,10 @@ void main() {
         return true;
       });
       socket.packets.clear();
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).kexInProgress = false;
       final extensionMessage = Uint8List.fromList([200, 1, 2, 3]);
 
-      await transport.testHooks.handleMessage(extensionMessage);
+      await transportTestHooks(transport).handleMessage(extensionMessage);
 
       expect(received, [extensionMessage]);
       expect(socket.packets, isEmpty);
@@ -136,7 +138,7 @@ void main() {
         },
       );
       socket.packets.clear();
-      transport.testHooks.kexInProgress = false;
+      transportTestHooks(transport).kexInProgress = false;
 
       final messages = [
         SSH_Message_Ignore.empty().encode(),
@@ -148,7 +150,7 @@ void main() {
         SSH_Message_Unimplemented(12).encode(),
       ];
       for (final message in messages) {
-        await transport.testHooks.handleMessage(message);
+        await transportTestHooks(transport).handleMessage(message);
       }
 
       expect(upperLayerCalls, 0);
@@ -164,14 +166,14 @@ void main() {
         onMessage: (_) => false,
       );
       socket.packets.clear();
-      transport.testHooks.kexInProgress = false;
-      transport.testHooks.remotePacketSN.value = 41;
+      transportTestHooks(transport).kexInProgress = false;
+      transportTestHooks(transport).remotePacketSN.value = 41;
 
-      final buffer = transport.testHooks.buffer;
+      final buffer = transportTestHooks(transport).buffer;
       buffer.add(clearTextPacket(Uint8List.fromList([200])));
       buffer.add(clearTextPacket(Uint8List.fromList([201])));
 
-      await transport.testHooks.processPackets();
+      await transportTestHooks(transport).processPackets();
 
       expect(socket.packets, hasLength(2));
       expect(
@@ -189,12 +191,12 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket, onMessage: (_) => false);
       socket.packets.clear();
-      transport.testHooks.strictKex = true;
-      transport.testHooks.isFirstKex = true;
-      transport.testHooks.kexInProgress = true;
+      transportTestHooks(transport).strictKex = true;
+      transportTestHooks(transport).isFirstKex = true;
+      transportTestHooks(transport).kexInProgress = true;
 
       await expectLater(
-        transport.testHooks.handleMessage(Uint8List.fromList([255])),
+        transportTestHooks(transport).handleMessage(Uint8List.fromList([255])),
         throwsA(isA<SSHHandshakeError>()),
       );
       expect(socket.packets, isEmpty);
@@ -206,12 +208,13 @@ void main() {
       final socket = _CaptureSSHSocket();
       final transport = SSHTransport(socket, onMessage: (_) => false);
       socket.packets.clear();
-      transport.testHooks.strictKex = true;
-      transport.testHooks.isFirstKex = false;
-      transport.testHooks.kexInProgress = true;
-      transport.testHooks.remotePacketSN.value = 9;
+      transportTestHooks(transport).strictKex = true;
+      transportTestHooks(transport).isFirstKex = false;
+      transportTestHooks(transport).kexInProgress = true;
+      transportTestHooks(transport).remotePacketSN.value = 9;
 
-      await transport.testHooks.handleMessage(Uint8List.fromList([255]));
+      await transportTestHooks(transport)
+          .handleMessage(Uint8List.fromList([255]));
 
       expect(socket.packets, hasLength(1));
       expect(sentUnimplemented(socket.packets.single).sequenceNumber, 9);
