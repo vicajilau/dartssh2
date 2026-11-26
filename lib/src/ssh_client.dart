@@ -1632,15 +1632,19 @@ class SSHClient {
     _currentAuthMethod = _authMethodsLeft.removeFirst();
     printDebug?.call('_currentAuthMethod = $_currentAuthMethod');
 
+    // Every method goes through _catch, the synchronous ones included. This
+    // can run from inside a callback whose attempt has just been superseded,
+    // and that callback's _catch ignores what it no longer owns, so a failure
+    // here must be reported under the new generation, not left to bubble up.
     switch (_currentAuthMethod!) {
       case SSHAuthMethod.none:
-        return _authWithNone();
+        return _catch(_authWithNone);
       case SSHAuthMethod.password:
         return _catch(() => _authWithPassword());
       case SSHAuthMethod.publicKey:
         return _catch(() => _authWithNextPublicKey());
       case SSHAuthMethod.keyboardInteractive:
-        return _authWithKeyboardInteractive();
+        return _catch(_authWithKeyboardInteractive);
       case SSHAuthMethod.hostbased:
         return _catch(() => _authWithNextHostbased());
     }

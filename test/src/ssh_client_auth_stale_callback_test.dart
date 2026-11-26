@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:dartssh2/src/message/msg_service.dart';
 import 'package:dartssh2/src/message/msg_userauth.dart';
+import 'package:dartssh2/src/ssh_client.dart';
+import 'package:dartssh2/src/ssh_transport.dart';
 import 'package:test/test.dart';
 
 /// A credential callback or signer can complete long after the attempt it
@@ -15,6 +17,7 @@ void main() {
   Future<void> tick() => Future<void>.delayed(Duration.zero);
 
   late List<String> sent;
+  late _FakeSSHSocket socket;
   late SSHClient client;
 
   void create({
@@ -25,8 +28,9 @@ void main() {
     List<SSHIdentity>? hostbased,
   }) {
     sent = [];
+    socket = _FakeSSHSocket();
     client = SSHClient(
-      _FakeSSHSocket(),
+      socket,
       username: 'test-user',
       onPasswordRequest: password,
       onUserInfoRequest: interactive,
@@ -250,17 +254,50 @@ void main() {
       });
     });
   }
+
+  // A callback that gives up moves authentication on to the next method from
+  // inside its own, now superseded, attempt. A failure in that next method
+  // belongs to the new attempt and must still close the connection.
+  for (final next in ['none', 'keyboard-interactive']) {
+    test('a failure moving on to $next after a declined password closes',
+        () async {
+      final password = Completer<String?>();
+      create(
+        password: () => password.future,
+        interactive: next == 'keyboard-interactive' ? (_) => const [] : null,
+      );
+      await start();
+      transportTestHooks(clientTestHooks(client).transport).kexInProgress =
+          false;
+      final aborted = expectLater(
+        client.authenticated,
+        throwsA(
+          isA<SSHAuthAbortError>()
+              .having((e) => e.reason, 'reason', isA<SSHInternalError>()),
+        ),
+      );
+
+      socket.writeError = StateError('write failed');
+      password.complete(null);
+      await aborted;
+
+      expect(client.isClosed, isTrue);
+    });
+  }
 }
 
 class _FakeSSHSocket implements SSHSocket {
   final _inputController = StreamController<Uint8List>();
   final _doneCompleter = Completer<void>();
 
+  /// When set, every write fails with it.
+  Object? writeError;
+
   @override
   Stream<Uint8List> get stream => _inputController.stream;
 
   @override
-  StreamSink<List<int>> get sink => _NullSink();
+  StreamSink<List<int>> get sink => _NullSink(this);
 
   @override
   Future<void> get done => _doneCompleter.future;
@@ -286,8 +323,15 @@ class _FakeSSHSocket implements SSHSocket {
 }
 
 class _NullSink implements StreamSink<List<int>> {
+  _NullSink(this._socket);
+
+  final _FakeSSHSocket _socket;
+
   @override
-  void add(List<int> data) {}
+  void add(List<int> data) {
+    final error = _socket.writeError;
+    if (error != null) throw error;
+  }
 
   @override
   void addError(Object error, [StackTrace? stackTrace]) {}
